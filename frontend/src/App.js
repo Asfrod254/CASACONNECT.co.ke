@@ -86,15 +86,6 @@ const landlordNav = [
 
 const SESSION_KEY = 'casaconnect_session';
 const SUPPORT_PHONE = '0102686169';
-const MAX_RENT_AMOUNT = 9999999999.99;
-
-function validateRentAmount(value) {
-  const numberValue = Number(value);
-  if (!Number.isFinite(numberValue) || numberValue <= 0 || numberValue > MAX_RENT_AMOUNT) {
-    throw new Error('Rent must be a valid positive amount under 10,000,000,000.');
-  }
-  return numberValue;
-}
 
 function getStoredSession() {
   if (typeof window === 'undefined') {
