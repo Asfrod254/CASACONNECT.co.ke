@@ -180,6 +180,12 @@ function PortalAccountActions({ profilePath, settingsPath, loginPath, userName }
     navigate(loginPath || '/', { replace: true });
   };
 
+  // eslint-disable-next-line no-unused-vars
+function validateRentAmount() {
+  ...
+}
+
+
   return (
     <div className="account-tools">
       <Link className="ghost-button compact-button" to={profilePath}>
