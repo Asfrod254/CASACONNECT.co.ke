@@ -2085,10 +2085,7 @@ function LandlordPropertyFormPage() {
       throw new Error('Missing required property fields.');
     }
 
-    const rent = Number(textValue(source.rent));
-    if (!Number.isFinite(rent) || rent <= 0) {
-      throw new Error('Property rent must be a valid positive number.');
-    }
+    const rent = validateRentAmount(textValue(source.rent));
 
     return {
       title: textValue(source.title),
@@ -2550,10 +2547,7 @@ function AdminPropertyFormPage() {
       throw new Error('Missing required property fields.');
     }
 
-    const rent = Number(textValue(source.rent));
-    if (!Number.isFinite(rent) || rent <= 0) {
-      throw new Error('Property rent must be a valid positive number.');
-    }
+    const rent = validateRentAmount(textValue(source.rent));
 
     return {
       title: textValue(source.title),
