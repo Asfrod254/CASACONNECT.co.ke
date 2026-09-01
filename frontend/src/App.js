@@ -112,6 +112,37 @@ function SkeletonRow() {
   );
 }
 
+function SkeletonTable({ cols = 4, rows = 5 }) {
+  return (
+    <tbody>
+      {Array.from({ length: rows }).map((_, r) => (
+        <tr key={r}>
+          {Array.from({ length: cols }).map((__, c) => (
+            <td key={c}><Skeleton height={14} width={c === 0 ? '80%' : '60%'} /></td>
+          ))}
+        </tr>
+      ))}
+    </tbody>
+  );
+}
+
+function SkeletonStats() {
+  return (
+    <section className="stats-grid">
+      {[1,2,3,4].map((k) => (
+        <div className="stat-card" key={k}>
+          <span className="stat-accent" style={{ background: '#e8eeeb' }} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            <Skeleton height={10} width="50%" />
+            <Skeleton height={28} width="40%" />
+            <Skeleton height={10} width="65%" />
+          </div>
+        </div>
+      ))}
+    </section>
+  );
+}
+
 const FAQ = [
   { q: 'How do I submit a rental request?', a: 'Browse Properties, open a listing, write a short intro and click "Send rental request".' },
   { q: 'How long does approval take?', a: 'Landlords typically respond within 24–48 hours. Track status under Requests.' },
@@ -736,7 +767,28 @@ function UserPropertyDetailsPage() {
   }
 
   if (!property) {
-    return <UserShell title="Property"><div className="empty-state">Loading property…</div></UserShell>;
+    return (
+      <UserShell title="Property">
+        <div className="detail-grid">
+          <div className="detail-main">
+            <Skeleton height={240} radius={20} style={{ marginBottom: '1.5rem' }} />
+            <div className="panel" style={{ display: 'flex', flexDirection: 'column', gap: '0.7rem' }}>
+              <Skeleton height={12} width="30%" />
+              <Skeleton height={18} width="55%" />
+              <Skeleton height={14} width="90%" />
+              <Skeleton height={14} width="80%" />
+            </div>
+          </div>
+          <div className="detail-side">
+            <div className="panel" style={{ display: 'flex', flexDirection: 'column', gap: '0.7rem' }}>
+              <Skeleton height={12} width="40%" />
+              <Skeleton height={36} width="60%" />
+              <Skeleton height={44} />
+            </div>
+          </div>
+        </div>
+      </UserShell>
+    );
   }
 
   return (
@@ -877,10 +929,12 @@ function ReviewForm({ existing, onSubmit }) {
 function UserRequestsPage() {
   const [requests, setRequests] = useState([]);
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
   const session = getStoredSession();
 
   useEffect(() => {
-    getRentalRequests(session?.token).then(setRequests).catch((loadError) => setError(loadError.message));
+    setLoading(true);
+    getRentalRequests(session?.token).then(setRequests).catch((loadError) => setError(loadError.message)).finally(() => setLoading(false));
   }, [session?.token]);
 
   return (
@@ -895,19 +949,21 @@ function UserRequestsPage() {
               <th>Status</th>
             </tr>
           </thead>
-          <tbody>
-            {requests.map((request) => (
-              <tr key={request.id}>
-                <td>{request.properties?.title || 'Property'}</td>
-                <td>{request.properties?.city || 'Assigned landlord'}</td>
-                <td>{new Date(request.created_at).toLocaleDateString()}</td>
-                <td><span className={`status-pill ${request.status}`}>{request.status}</span></td>
-              </tr>
-            ))}
-          </tbody>
+          {loading ? <SkeletonTable cols={4} rows={4} /> : (
+            <tbody>
+              {requests.map((request) => (
+                <tr key={request.id}>
+                  <td>{request.properties?.title || 'Property'}</td>
+                  <td>{request.properties?.city || 'Assigned landlord'}</td>
+                  <td>{new Date(request.created_at).toLocaleDateString()}</td>
+                  <td><span className={`status-pill ${request.status}`}>{request.status}</span></td>
+                </tr>
+              ))}
+            </tbody>
+          )}
         </table>
         {error && <p className="auth-error">{error}</p>}
-        {!requests.length && !error && <p className="empty-state">You have not submitted any rental requests.</p>}
+        {!loading && !requests.length && !error && <p className="empty-state">You have not submitted any rental requests.</p>}
       </div>
     </UserShell>
   );
@@ -1465,10 +1521,14 @@ function ResetPasswordPage() {
 function AdminDashboardPage() {
   const [stats, setStats] = useState({});
   const [analytics, setAnalytics] = useState({});
+  const [loading, setLoading] = useState(true);
   const session = getStoredSession();
-  useEffect(() => { getAdminStats(session?.token).then(setStats).catch(() => setStats({})); }, [session?.token]);
   useEffect(() => {
-    getAdminAnalytics(session?.token).then(setAnalytics).catch(() => setAnalytics({}));
+    setLoading(true);
+    Promise.all([
+      getAdminStats(session?.token).catch(() => ({})),
+      getAdminAnalytics(session?.token).catch(() => ({})),
+    ]).then(([s, a]) => { setStats(s); setAnalytics(a); }).finally(() => setLoading(false));
   }, [session?.token]);
 
   const userData = analytics.usersByMonth || [];
@@ -1477,12 +1537,14 @@ function AdminDashboardPage() {
 
   return (
     <AdminShell title="Dashboard" subtitle="Monitor portfolio growth, requests, and admin actions across CasaConnect.">
-      <section className="stats-grid">
-        <StatCard label="Users" value={stats.users || 0} detail="Accounts in database" accent="blue" />
-        <StatCard label="Properties" value={stats.properties || 0} detail="Saved listings" accent="green" />
-        <StatCard label="Pending listings" value={stats.pendingProperties || 0} detail="Awaiting approval" accent="orange" />
-        <StatCard label="Flagged reviews" value={stats.flaggedReviews || 0} detail="Needs moderation" accent="purple" />
-      </section>
+      {loading ? <SkeletonStats /> : (
+        <section className="stats-grid">
+          <StatCard label="Users" value={stats.users || 0} detail="Accounts in database" accent="blue" />
+          <StatCard label="Properties" value={stats.properties || 0} detail="Saved listings" accent="green" />
+          <StatCard label="Pending listings" value={stats.pendingProperties || 0} detail="Awaiting approval" accent="orange" />
+          <StatCard label="Flagged reviews" value={stats.flaggedReviews || 0} detail="Needs moderation" accent="purple" />
+        </section>
+      )}
 
       <section className="content-grid analytics-grid">
         <div className="panel">
@@ -1685,9 +1747,13 @@ function AdminUsersPage() {
   const [users, setUsers] = useState([]);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
   const session = getStoredSession();
 
-  const loadUsers = () => { getAdminData('users', session?.token).then(setUsers).catch((e) => setError(e.message)); };
+  const loadUsers = () => {
+    setLoading(true);
+    getAdminData('users', session?.token).then(setUsers).catch((e) => setError(e.message)).finally(() => setLoading(false));
+  };
   useEffect(() => { loadUsers(); }, [session?.token]);
 
   const toggleStatus = async (user) => {
@@ -1730,45 +1796,35 @@ function AdminUsersPage() {
               <th>Actions</th>
             </tr>
           </thead>
-          <tbody>
-            {users.map((user) => (
-              <tr key={user.id}>
-                <td>
-                  <strong>{user.full_name || 'No name'}</strong>
-                  {user.phone && <small><br />{user.phone}</small>}
-                </td>
-                <td>{user.email}</td>
-                <td>
-                  <span className={`status-pill ${user.role}`}>{user.role}</span>
-                </td>
-                <td>
-                  <span className={`status-pill ${user.account_status || 'active'}`}>{user.account_status || 'active'}</span>
-                </td>
-                <td>
-                  <div className="table-actions">
-                    <button
-                      type="button"
-                      className={`ghost-button compact-button ${user.account_status === 'suspended' ? 'success' : 'danger'}`}
-                      onClick={() => toggleStatus(user)}
-                    >
-                      {user.account_status === 'suspended' ? 'Reactivate' : 'Suspend'}
-                    </button>
-                    {user.role !== 'admin' && (
-                      <button
-                        type="button"
-                        className="ghost-button compact-button"
-                        onClick={() => changeRole(user, user.role === 'landlord' ? 'tenant' : 'landlord')}
-                      >
-                        Make {user.role === 'landlord' ? 'tenant' : 'landlord'}
+          {loading ? <SkeletonTable cols={5} rows={5} /> : (
+            <tbody>
+              {users.map((user) => (
+                <tr key={user.id}>
+                  <td>
+                    <strong>{user.full_name || 'No name'}</strong>
+                    {user.phone && <small><br />{user.phone}</small>}
+                  </td>
+                  <td>{user.email}</td>
+                  <td><span className={`status-pill ${user.role}`}>{user.role}</span></td>
+                  <td><span className={`status-pill ${user.account_status || 'active'}`}>{user.account_status || 'active'}</span></td>
+                  <td>
+                    <div className="table-actions">
+                      <button type="button" className={`ghost-button compact-button ${user.account_status === 'suspended' ? 'success' : 'danger'}`} onClick={() => toggleStatus(user)}>
+                        {user.account_status === 'suspended' ? 'Reactivate' : 'Suspend'}
                       </button>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
+                      {user.role !== 'admin' && (
+                        <button type="button" className="ghost-button compact-button" onClick={() => changeRole(user, user.role === 'landlord' ? 'tenant' : 'landlord')}>
+                          Make {user.role === 'landlord' ? 'tenant' : 'landlord'}
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          )}
         </table>
-        {!users.length && !error && <p className="empty-state">No users registered yet.</p>}
+        {!loading && !users.length && !error && <p className="empty-state">No users registered yet.</p>}
       </div>
     </AdminShell>
   );
@@ -1850,9 +1906,13 @@ function AdminPropertiesPage() {
   const [properties, setProperties] = useState([]);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
   const session = getStoredSession();
 
-  const loadProperties = () => { getAdminData('properties', session?.token).then(setProperties).catch((e) => setError(e.message)); };
+  const loadProperties = () => {
+    setLoading(true);
+    getAdminData('properties', session?.token).then(setProperties).catch((e) => setError(e.message)).finally(() => setLoading(false));
+  };
   useEffect(() => { loadProperties(); }, [session?.token]);
 
   const updateStatus = async (property, newStatus) => {
@@ -1882,54 +1942,27 @@ function AdminPropertiesPage() {
               <th>Actions</th>
             </tr>
           </thead>
-          <tbody>
-            {properties.map((property) => (
-              <tr key={property.id}>
-                <td>
-                  <strong>{property.title}</strong>
-                  <small><br />{property.address}</small>
-                </td>
-                <td>{property.city}</td>
-                <td>{Number(property.rent).toLocaleString()} KES</td>
-                <td>
-                  <span className={`status-pill ${property.listing_status}`}>{property.listing_status}</span>
-                </td>
-                <td>
-                  <div className="table-actions">
-                    {property.listing_status !== 'approved' && (
-                      <button
-                        type="button"
-                        className="ghost-button compact-button success"
-                        onClick={() => updateStatus(property, 'approved')}
-                      >
-                        Approve
-                      </button>
-                    )}
-                    {property.listing_status !== 'rejected' && (
-                      <button
-                        type="button"
-                        className="ghost-button compact-button danger"
-                        onClick={() => updateStatus(property, 'rejected')}
-                      >
-                        Reject
-                      </button>
-                    )}
-                    {property.listing_status === 'approved' && (
-                      <button
-                        type="button"
-                        className="ghost-button compact-button"
-                        onClick={() => updateStatus(property, 'suspended')}
-                      >
-                        Suspend
-                      </button>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
+          {loading ? <SkeletonTable cols={5} rows={5} /> : (
+            <tbody>
+              {properties.map((property) => (
+                <tr key={property.id}>
+                  <td><strong>{property.title}</strong><small><br />{property.address}</small></td>
+                  <td>{property.city}</td>
+                  <td>{Number(property.rent).toLocaleString()} KES</td>
+                  <td><span className={`status-pill ${property.listing_status}`}>{property.listing_status}</span></td>
+                  <td>
+                    <div className="table-actions">
+                      {property.listing_status !== 'approved' && <button type="button" className="ghost-button compact-button success" onClick={() => updateStatus(property, 'approved')}>Approve</button>}
+                      {property.listing_status !== 'rejected' && <button type="button" className="ghost-button compact-button danger" onClick={() => updateStatus(property, 'rejected')}>Reject</button>}
+                      {property.listing_status === 'approved' && <button type="button" className="ghost-button compact-button" onClick={() => updateStatus(property, 'suspended')}>Suspend</button>}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          )}
         </table>
-        {!properties.length && !error && <p className="empty-state">No listings submitted yet.</p>}
+        {!loading && !properties.length && !error && <p className="empty-state">No listings submitted yet.</p>}
       </div>
     </AdminShell>
   );
@@ -1939,9 +1972,13 @@ function LandlordsTable() {
   const [landlords, setLandlords] = useState([]);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
   const session = getStoredSession();
 
-  const load = () => { getAdminLandlords(session?.token).then(setLandlords).catch((e) => setError(e.message)); };
+  const load = () => {
+    setLoading(true);
+    getAdminLandlords(session?.token).then(setLandlords).catch((e) => setError(e.message)).finally(() => setLoading(false));
+  };
   useEffect(load, [session?.token]);
 
   const remove = async (id, email) => {
@@ -1959,23 +1996,25 @@ function LandlordsTable() {
       {error && <p className="auth-error">{error}</p>}
       <table>
         <thead><tr><th>Name</th><th>Email</th><th>Company</th><th>Status</th><th>Actions</th></tr></thead>
-        <tbody>
-          {landlords.map((l) => (
-            <tr key={l.id}>
-              <td>{l.full_name || '—'}</td>
-              <td>{l.email}</td>
-              <td>{l.company || '—'}</td>
-              <td><span className={`status-pill ${l.account_status || 'active'}`}>{l.account_status || 'active'}</span></td>
-              <td>
-                <button type="button" className="ghost-button compact-button danger" onClick={() => remove(l.id, l.email)}>
-                  <Trash2 size={14} /> Delete
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
+        {loading ? <SkeletonTable cols={5} rows={4} /> : (
+          <tbody>
+            {landlords.map((l) => (
+              <tr key={l.id}>
+                <td>{l.full_name || '—'}</td>
+                <td>{l.email}</td>
+                <td>{l.company || '—'}</td>
+                <td><span className={`status-pill ${l.account_status || 'active'}`}>{l.account_status || 'active'}</span></td>
+                <td>
+                  <button type="button" className="ghost-button compact-button danger" onClick={() => remove(l.id, l.email)}>
+                    <Trash2 size={14} /> Delete
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        )}
       </table>
-      {!landlords.length && !error && <p className="empty-state">No landlord accounts yet.</p>}
+      {!loading && !landlords.length && !error && <p className="empty-state">No landlord accounts yet.</p>}
     </div>
   );
 }
@@ -1984,9 +2023,13 @@ function AdminRequestsPage() {
   const [requests, setRequests] = useState([]);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
   const session = getStoredSession();
 
-  const load = () => { getAdminRequests(session?.token).then(setRequests).catch((e) => setError(e.message)); };
+  const load = () => {
+    setLoading(true);
+    getAdminRequests(session?.token).then(setRequests).catch((e) => setError(e.message)).finally(() => setLoading(false));
+  };
   useEffect(load, [session?.token]);
 
   const update = async (id, status) => {
@@ -2004,25 +2047,27 @@ function AdminRequestsPage() {
       <div className="panel table-panel">
         <table>
           <thead><tr><th>Tenant</th><th>Property</th><th>Message</th><th>Date</th><th>Status</th><th>Actions</th></tr></thead>
-          <tbody>
-            {requests.map((r) => (
-              <tr key={r.id}>
-                <td>{r.users?.full_name || r.tenant_id}</td>
-                <td>{r.properties?.title || '—'}</td>
-                <td><small>{r.message || '—'}</small></td>
-                <td>{new Date(r.created_at).toLocaleDateString()}</td>
-                <td><span className={`status-pill ${r.status}`}>{r.status}</span></td>
-                <td>
-                  <div className="table-actions">
-                    {r.status !== 'approved' && <button type="button" className="ghost-button compact-button success" onClick={() => update(r.id, 'approved')}>Approve</button>}
-                    {r.status !== 'rejected' && <button type="button" className="ghost-button compact-button danger" onClick={() => update(r.id, 'rejected')}>Reject</button>}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
+          {loading ? <SkeletonTable cols={6} rows={5} /> : (
+            <tbody>
+              {requests.map((r) => (
+                <tr key={r.id}>
+                  <td>{r.users?.full_name || r.tenant_id}</td>
+                  <td>{r.properties?.title || '—'}</td>
+                  <td><small>{r.message || '—'}</small></td>
+                  <td>{new Date(r.created_at).toLocaleDateString()}</td>
+                  <td><span className={`status-pill ${r.status}`}>{r.status}</span></td>
+                  <td>
+                    <div className="table-actions">
+                      {r.status !== 'approved' && <button type="button" className="ghost-button compact-button success" onClick={() => update(r.id, 'approved')}>Approve</button>}
+                      {r.status !== 'rejected' && <button type="button" className="ghost-button compact-button danger" onClick={() => update(r.id, 'rejected')}>Reject</button>}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          )}
         </table>
-        {!requests.length && !error && <p className="empty-state">No rental requests yet.</p>}
+        {!loading && !requests.length && !error && <p className="empty-state">No rental requests yet.</p>}
       </div>
     </AdminShell>
   );
@@ -2031,10 +2076,12 @@ function AdminRequestsPage() {
 function AdminMessagesPage() {
   const [messages, setMessages] = useState([]);
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
   const session = getStoredSession();
 
   useEffect(() => {
-    getAdminMessages(session?.token).then(setMessages).catch((e) => setError(e.message));
+    setLoading(true);
+    getAdminMessages(session?.token).then(setMessages).catch((e) => setError(e.message)).finally(() => setLoading(false));
   }, [session?.token]);
 
   return (
@@ -2043,18 +2090,20 @@ function AdminMessagesPage() {
       <div className="panel table-panel">
         <table>
           <thead><tr><th>Property</th><th>Sender</th><th>Message</th><th>Date</th></tr></thead>
-          <tbody>
-            {messages.map((m) => (
-              <tr key={m.id}>
-                <td>{m.properties?.title || '—'}</td>
-                <td>{m.users?.full_name || m.sender_id}</td>
-                <td><small>{m.message}</small></td>
-                <td>{new Date(m.created_at).toLocaleDateString()}</td>
-              </tr>
-            ))}
-          </tbody>
+          {loading ? <SkeletonTable cols={4} rows={5} /> : (
+            <tbody>
+              {messages.map((m) => (
+                <tr key={m.id}>
+                  <td>{m.properties?.title || '—'}</td>
+                  <td>{m.users?.full_name || m.sender_id}</td>
+                  <td><small>{m.message}</small></td>
+                  <td>{new Date(m.created_at).toLocaleDateString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          )}
         </table>
-        {!messages.length && !error && <p className="empty-state">No messages recorded yet.</p>}
+        {!loading && !messages.length && !error && <p className="empty-state">No messages recorded yet.</p>}
       </div>
     </AdminShell>
   );
@@ -2064,9 +2113,13 @@ function AdminReviewsPage() {
   const [reviews, setReviews] = useState([]);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
   const session = getStoredSession();
 
-  const loadReviews = () => { getAdminData('reviews', session?.token).then(setReviews).catch((e) => setError(e.message)); };
+  const loadReviews = () => {
+    setLoading(true);
+    getAdminData('reviews', session?.token).then(setReviews).catch((e) => setError(e.message)).finally(() => setLoading(false));
+  };
   useEffect(() => { loadReviews(); }, [session?.token]);
 
   const moderateReview = async (review, status) => {
@@ -2095,58 +2148,30 @@ function AdminReviewsPage() {
               <th>Actions</th>
             </tr>
           </thead>
-          <tbody>
-            {reviews.map((review) => (
-              <tr key={review.id}>
-                <td>
-                  <div className="rating-stars">
-                    {[1, 2, 3, 4, 5].map((star) => (
-                      <Star key={star} size={13} className={star <= review.rating ? 'star-filled' : ''} />
-                    ))}
-                  </div>
-                </td>
-                <td>
-                  <p>{review.comment || 'No comment provided.'}</p>
-                </td>
-                <td>
-                  <span className={`status-pill ${review.moderation_status || 'approved'}`}>{review.moderation_status || 'approved'}</span>
-                </td>
-                <td>
-                  <div className="table-actions">
-                    {review.moderation_status !== 'approved' && (
-                      <button
-                        type="button"
-                        className="ghost-button compact-button success"
-                        onClick={() => moderateReview(review, 'approved')}
-                      >
-                        Approve
-                      </button>
-                    )}
-                    {review.moderation_status !== 'flagged' && (
-                      <button
-                        type="button"
-                        className="ghost-button compact-button danger"
-                        onClick={() => moderateReview(review, 'flagged')}
-                      >
-                        Flag
-                      </button>
-                    )}
-                    {review.moderation_status !== 'removed' && (
-                      <button
-                        type="button"
-                        className="ghost-button compact-button"
-                        onClick={() => moderateReview(review, 'removed')}
-                      >
-                        Remove
-                      </button>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
+          {loading ? <SkeletonTable cols={4} rows={5} /> : (
+            <tbody>
+              {reviews.map((review) => (
+                <tr key={review.id}>
+                  <td>
+                    <div className="rating-stars">
+                      {[1,2,3,4,5].map((star) => <Star key={star} size={13} className={star <= review.rating ? 'star-filled' : ''} />)}
+                    </div>
+                  </td>
+                  <td><p>{review.comment || 'No comment provided.'}</p></td>
+                  <td><span className={`status-pill ${review.moderation_status || 'approved'}`}>{review.moderation_status || 'approved'}</span></td>
+                  <td>
+                    <div className="table-actions">
+                      {review.moderation_status !== 'approved' && <button type="button" className="ghost-button compact-button success" onClick={() => moderateReview(review, 'approved')}>Approve</button>}
+                      {review.moderation_status !== 'flagged' && <button type="button" className="ghost-button compact-button danger" onClick={() => moderateReview(review, 'flagged')}>Flag</button>}
+                      {review.moderation_status !== 'removed' && <button type="button" className="ghost-button compact-button" onClick={() => moderateReview(review, 'removed')}>Remove</button>}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          )}
         </table>
-        {!reviews.length && !error && <p className="empty-state">No reviews recorded yet.</p>}
+        {!loading && !reviews.length && !error && <p className="empty-state">No reviews recorded yet.</p>}
       </div>
     </AdminShell>
   );
@@ -2277,29 +2302,30 @@ function LandlordDashboardPage() {
   const session = getStoredSession();
   const [properties, setProperties] = useState([]);
   const [requests, setRequests] = useState([]);
+  const [loading, setLoading] = useState(true);
   useEffect(() => {
-    getProperties().then(setProperties).catch(() => setProperties([]));
-    getRentalRequests(session?.token).then(setRequests).catch(() => setRequests([]));
+    setLoading(true);
+    Promise.all([
+      getProperties().catch(() => []),
+      getRentalRequests(session?.token).catch(() => []),
+    ]).then(([p, r]) => { setProperties(p); setRequests(r); }).finally(() => setLoading(false));
   }, [session?.token]);
   return (
     <LandlordShell title="Dashboard" subtitle="Track listings, tenant requests, and rental income for your portfolio.">
-      <section className="stats-grid">
-        <StatCard label="Properties" value={properties.length} detail="Backend listings" accent="green" />
-        <StatCard label="Pending requests" value={requests.filter((request) => request.status === 'pending').length} detail="Awaiting response" accent="orange" />
-        <StatCard label="Approved requests" value={requests.filter((request) => request.status === 'approved').length} detail="Accepted tenants" accent="blue" />
-        <StatCard label="Messages" value="0" detail="Live message count available per property" accent="purple" />
-      </section>
+      {loading ? <SkeletonStats /> : (
+        <section className="stats-grid">
+          <StatCard label="Properties" value={properties.length} detail="Backend listings" accent="green" />
+          <StatCard label="Pending requests" value={requests.filter((r) => r.status === 'pending').length} detail="Awaiting response" accent="orange" />
+          <StatCard label="Approved requests" value={requests.filter((r) => r.status === 'approved').length} detail="Accepted tenants" accent="blue" />
+          <StatCard label="Messages" value="0" detail="Live message count available per property" accent="purple" />
+        </section>
+      )}
 
       <section className="content-grid">
         <div className="panel">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">Portfolio</p>
-              <h3>Managed properties</h3>
-            </div>
-          </div>
+          <div className="panel-header"><div><p className="eyebrow">Portfolio</p><h3>Managed properties</h3></div></div>
           <div className="list-stack">
-            {properties.map((property) => (
+            {loading ? [1,2,3].map((k) => <SkeletonRow key={k} />) : properties.map((property) => (
               <div className="list-row" key={property.id}>
                 <div>
                   <strong>{property.title}</strong>
@@ -2312,14 +2338,9 @@ function LandlordDashboardPage() {
         </div>
 
         <div className="panel">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">Requests</p>
-              <h3>Tenant follow-ups</h3>
-            </div>
-          </div>
+          <div className="panel-header"><div><p className="eyebrow">Requests</p><h3>Tenant follow-ups</h3></div></div>
           <div className="list-stack">
-            {requests.map((request) => (
+            {loading ? [1,2,3].map((k) => <SkeletonRow key={k} />) : requests.map((request) => (
               <div className="list-row" key={request.id}>
                 <div>
                   <strong>{request.tenant_id}</strong>
@@ -2340,8 +2361,12 @@ function LandlordPropertiesPage() {
   const [properties, setProperties] = useState([]);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [loading, setLoading] = useState(true);
 
-  const loadProperties = () => getMyProperties(session?.token).then(setProperties).catch((loadError) => setError(loadError.message));
+  const loadProperties = () => {
+    setLoading(true);
+    getMyProperties(session?.token).then(setProperties).catch((loadError) => setError(loadError.message)).finally(() => setLoading(false));
+  };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { loadProperties(); }, [session?.token]);
 
@@ -2373,28 +2398,26 @@ function LandlordPropertiesPage() {
               <th>Actions</th>
             </tr>
           </thead>
-          <tbody>
-            {properties.map((property) => (
-              <tr key={property.id}>
-                <td>{property.title}</td>
-                <td>{property.address || property.location || 'Location pending'}</td>
-                <td>{Number(property.rent || property.price || 0).toLocaleString()} KES</td>
-                <td><span className={`status-pill ${property.listing_status || 'pending'}`}>{property.listing_status || 'pending'}</span></td>
-                <td>
-                  <div className="table-actions">
-                    <Link className="ghost-button compact-button" to={`/landlord/properties/${property.id}/edit`}>
-                      <Pencil size={14} /> Edit
-                    </Link>
-                    <button type="button" className="ghost-button compact-button danger" onClick={() => handleDelete(property.id, property.title)}>
-                      <Trash2 size={14} /> Delete
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
+          {loading ? <SkeletonTable cols={5} rows={4} /> : (
+            <tbody>
+              {properties.map((property) => (
+                <tr key={property.id}>
+                  <td>{property.title}</td>
+                  <td>{property.address || property.location || 'Location pending'}</td>
+                  <td>{Number(property.rent || property.price || 0).toLocaleString()} KES</td>
+                  <td><span className={`status-pill ${property.listing_status || 'pending'}`}>{property.listing_status || 'pending'}</span></td>
+                  <td>
+                    <div className="table-actions">
+                      <Link className="ghost-button compact-button" to={`/landlord/properties/${property.id}/edit`}><Pencil size={14} /> Edit</Link>
+                      <button type="button" className="ghost-button compact-button danger" onClick={() => handleDelete(property.id, property.title)}><Trash2 size={14} /> Delete</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          )}
         </table>
-        {!properties.length && !error && <p className="empty-state">You have not listed any properties yet.</p>}
+        {!loading && !properties.length && !error && <p className="empty-state">You have not listed any properties yet.</p>}
       </div>
       <Link className="primary-button full-width-button" to="/landlord/properties/new">
         <Building2 size={16} /> Add a property
@@ -2537,11 +2560,15 @@ function LandlordPropertyFormPage() {
 function LandlordRequestsPage() {
   const [requests, setRequests] = useState([]);
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
   const session = getStoredSession();
 
-  const loadRequests = () => getRentalRequests(session?.token).then(setRequests).catch((loadError) => setError(loadError.message));
+  const loadRequests = () => {
+    setLoading(true);
+    getRentalRequests(session?.token).then(setRequests).catch((loadError) => setError(loadError.message)).finally(() => setLoading(false));
+  };
   useEffect(() => {
-    getRentalRequests(session?.token).then(setRequests).catch((loadError) => setError(loadError.message));
+    getRentalRequests(session?.token).then(setRequests).catch((loadError) => setError(loadError.message)).finally(() => setLoading(false));
   }, [session?.token]);
 
   const changeStatus = async (id, status) => {
@@ -2565,19 +2592,21 @@ function LandlordRequestsPage() {
               <th>Action</th>
             </tr>
           </thead>
-          <tbody>
-            {requests.map((request) => (
-              <tr key={request.id}>
-                <td>{request.tenant_id}</td>
-                <td>{request.properties?.title || 'Property'}</td>
-                <td><span className={`status-pill ${request.status}`}>{request.status}</span></td>
-                <td><button className="ghost-button" type="button" onClick={() => changeStatus(request.id, 'approved')}>Approve</button>{request.status === 'pending' && <button className="ghost-button" type="button" onClick={() => changeStatus(request.id, 'rejected')}>Reject</button>}</td>
-              </tr>
-            ))}
-          </tbody>
+          {loading ? <SkeletonTable cols={4} rows={4} /> : (
+            <tbody>
+              {requests.map((request) => (
+                <tr key={request.id}>
+                  <td>{request.tenant_id}</td>
+                  <td>{request.properties?.title || 'Property'}</td>
+                  <td><span className={`status-pill ${request.status}`}>{request.status}</span></td>
+                  <td><button className="ghost-button" type="button" onClick={() => changeStatus(request.id, 'approved')}>Approve</button>{request.status === 'pending' && <button className="ghost-button" type="button" onClick={() => changeStatus(request.id, 'rejected')}>Reject</button>}</td>
+                </tr>
+              ))}
+            </tbody>
+          )}
         </table>
         {error && <p className="auth-error">{error}</p>}
-        {!requests.length && !error && <p className="empty-state">No tenant requests yet.</p>}
+        {!loading && !requests.length && !error && <p className="empty-state">No tenant requests yet.</p>}
       </div>
     </LandlordShell>
   );
