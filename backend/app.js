@@ -18,6 +18,7 @@ app.use(helmet());
 const allowedOrigins = [
   'http://localhost:3000',
   process.env.FRONTEND_URL,
+  'https://casaconnect-webco-ke-1.onrender.com',
 ].filter(Boolean);
 
 app.use(
