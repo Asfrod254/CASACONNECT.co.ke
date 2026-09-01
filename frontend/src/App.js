@@ -529,7 +529,7 @@ function UserDashboardPage() {
                     <span>{property.bathrooms || 0} bath</span>
                   </div>
                   <div className="property-footer">
-                    <strong>${Number(property.rent || property.price || 0).toLocaleString()}</strong>
+                    <strong>KES {Number(property.rent || property.price || 0).toLocaleString()}</strong>
                     <Link to="/tenant/properties" className="ghost-button">View</Link>
                   </div>
                 </div>
@@ -1137,10 +1137,16 @@ function UserMessagesPage() {
 function UserProfilePage() {
   const session = getStoredSession();
   const user = session?.user || {};
+  const PREFS_KEY = 'cc_tenant_prefs';
+  const savedPrefs = (() => { try { return JSON.parse(localStorage.getItem(PREFS_KEY)) || {}; } catch { return {}; } })();
   const [form, setForm] = useState({ full_name: user.name || '', phone: '', preferred_area: '', company: '' });
+  const [prefs, setPrefs] = useState({ budget: savedPrefs.budget ?? 150000, petFriendly: savedPrefs.petFriendly ?? false, furnished: savedPrefs.furnished ?? true });
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  const togglePref = (key) => setPrefs((p) => { const next = { ...p, [key]: !p[key] }; localStorage.setItem(PREFS_KEY, JSON.stringify(next)); return next; });
+  const saveBudget = (val) => { const next = { ...prefs, budget: Number(val) }; setPrefs(next); localStorage.setItem(PREFS_KEY, JSON.stringify(next)); };
 
   const handleSave = async (event) => {
     event.preventDefault();
@@ -1208,9 +1214,32 @@ function UserProfilePage() {
             </div>
           </div>
           <div className="setting-list">
-            <div className="setting-row"><span>Budget up to $1,500</span><button className="toggle on" type="button"><span /></button></div>
-            <div className="setting-row"><span>Pet friendly options</span><button className="toggle" type="button"><span /></button></div>
-            <div className="setting-row"><span>Furnished homes</span><button className="toggle on" type="button"><span /></button></div>
+            <div className="setting-row">
+              <span>Budget up to <strong>KES {Number(prefs.budget).toLocaleString()}</strong></span>
+            </div>
+            <div className="setting-row" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '0.4rem' }}>
+              <input
+                type="range"
+                min="10000"
+                max="500000"
+                step="5000"
+                value={prefs.budget}
+                onChange={(e) => saveBudget(e.target.value)}
+                style={{ width: '100%' }}
+                aria-label="Budget"
+              />
+              <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', fontSize: '0.72rem', opacity: 0.5 }}>
+                <span>KES 10,000</span><span>KES 500,000</span>
+              </div>
+            </div>
+            <div className="setting-row">
+              <span>Pet friendly options</span>
+              <button type="button" className={`toggle ${prefs.petFriendly ? 'on' : ''}`} onClick={() => togglePref('petFriendly')} aria-pressed={prefs.petFriendly}><span /></button>
+            </div>
+            <div className="setting-row">
+              <span>Furnished homes</span>
+              <button type="button" className={`toggle ${prefs.furnished ? 'on' : ''}`} onClick={() => togglePref('furnished')} aria-pressed={prefs.furnished}><span /></button>
+            </div>
           </div>
         </div>
       </div>
