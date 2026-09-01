@@ -9,7 +9,7 @@ const router = express.Router();
 
 router.post("/signup", async (req, res, next) => {
   try {
-    const { name, email, password, role } = req.body || {};
+    const { name, email, password, role, phone } = req.body || {};
 
     if (!name || !email || !password) {
       return next(createError(400, "Name, email, and password are required."));
@@ -74,7 +74,7 @@ router.post("/signup", async (req, res, next) => {
 
     const { data, error } = await profileClient
       .from("users")
-      .insert([{ id: authData.user.id, email: cleanEmail, full_name: String(name).trim(), role: normalizedRole }])
+      .insert([{ id: authData.user.id, email: cleanEmail, full_name: String(name).trim(), phone: String(phone || '').trim(), role: normalizedRole }])
       .select("id, email, role, created_at")
       .single();
 
@@ -123,8 +123,8 @@ router.post("/landlords", authenticateToken, requireRole("admin"), async (req, r
     const cleanedPhone = String(phone || "").trim();
     const cleanPassword = String(password || "");
 
-    if (!trimmedName || !cleanEmail || !cleanPassword || !cleanedPhone) {
-      return next(createError(400, "Name, email, phone, and password are required."));
+    if (!trimmedName || !cleanEmail || !cleanPassword) {
+      return next(createError(400, "Name, email, and password are required."));
     }
     if (!isValidEmail(cleanEmail) || cleanPassword.length < 6) {
       return next(createError(400, "Provide a valid email and a password of at least 6 characters."));
@@ -188,24 +188,14 @@ router.post("/forgot-password", async (req, res, next) => {
     }
 
     const client = ensureSupabase();
-    const { data, error } = await client.from("users").select("id, email").eq("email", email).maybeSingle();
 
-    if (error && error.code !== "PGRST116") {
-      throw error;
-    }
-
-    if (!data) {
-      return res.status(200).json({
-        success: true,
-        message: "If this email is registered, a reset link has been sent.",
-        supportPhone: "0102686169",
-      });
-    }
+    // Always return success to avoid email enumeration
+    const redirectTo = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/reset-password`;
+    await client.auth.resetPasswordForEmail(email, { redirectTo });
 
     return res.status(200).json({
       success: true,
-      message: "Reset instructions were sent to your email. For immediate help, call 0102686169.",
-      supportPhone: "0102686169",
+      message: "If this email is registered, a reset link has been sent.",
     });
   } catch (error) {
     return next(error);
@@ -214,40 +204,25 @@ router.post("/forgot-password", async (req, res, next) => {
 
 router.post("/reset-password", async (req, res, next) => {
   try {
-    const email = String(req.body?.email || "").trim().toLowerCase();
+    const access_token = String(req.body?.access_token || "").trim();
     const password = String(req.body?.password || "");
 
-    if (!email || !password) {
-      return next(createError(400, "Email and password are required."));
-    }
-    if (!isValidEmail(email)) {
-      return next(createError(400, "Please provide a valid email address."));
+    if (!access_token || !password) {
+      return next(createError(400, "Access token and new password are required."));
     }
     if (password.length < 6) {
       return next(createError(400, "Password must be at least 6 characters long."));
     }
 
-    const adminClient = ensureSupabaseAdmin();
-    const { data: userProfile, error: profileError } = await adminClient
-      .from("users")
-      .select("id")
-      .eq("email", email)
-      .maybeSingle();
-
-    if (profileError && profileError.code !== "PGRST116") {
-      throw profileError;
-    }
-
-    if (!userProfile) {
-      return next(createError(404, "No account found for that email."));
-    }
-
-    const { error: passwordError } = await adminClient.auth.admin.updateUserById(userProfile.id, {
-      password,
+    // Use the user's own session token to update their password
+    const { createClient } = require('@supabase/supabase-js');
+    const userClient = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY, {
+      global: { headers: { Authorization: `Bearer ${access_token}` } },
     });
 
-    if (passwordError) {
-      return next(createError(400, passwordError.message || "Unable to reset password."));
+    const { error } = await userClient.auth.updateUser({ password });
+    if (error) {
+      return next(createError(400, error.message || "Unable to reset password."));
     }
 
     return res.status(200).json({
@@ -257,6 +232,20 @@ router.post("/reset-password", async (req, res, next) => {
   } catch (error) {
     return next(error);
   }
+});
+
+router.patch("/profile", authenticateToken, async (req, res, next) => {
+  try {
+    const allowed = ["full_name", "phone", "preferred_area", "company"];
+    const updates = Object.fromEntries(
+      allowed.filter((f) => req.body[f] !== undefined).map((f) => [f, String(req.body[f] || "").trim()])
+    );
+    if (!Object.keys(updates).length) return next(createError(400, "No valid fields to update."));
+    const { data, error } = await ensureSupabaseAdmin()
+      .from("users").update(updates).eq("id", req.user.id).select("id, email, role, full_name, phone, preferred_area, company").single();
+    if (error) throw error;
+    return res.json({ success: true, user: data });
+  } catch (error) { return next(error); }
 });
 
 router.post("/login", async (req, res, next) => {
@@ -303,7 +292,7 @@ router.post("/login", async (req, res, next) => {
       id: data.id,
       email: data.email,
       role: data.role,
-    }, "1h");
+    });
 
     return res.status(200).json({
       success: true,

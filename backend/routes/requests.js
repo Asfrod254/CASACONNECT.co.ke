@@ -42,6 +42,8 @@ router.post("/", authenticateToken, requireRole("tenant"), async (req, res, next
     if (!propertyId) return next(createError(400, "Property is required."));
 
     const client = ensureSupabaseAdmin();
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(String(propertyId))) return next(createError(404, "Property not found."));
     const { data: property, error: propertyError } = await client
       .from("properties")
       .select("id")

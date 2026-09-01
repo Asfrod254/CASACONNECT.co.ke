@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://casaconnect-co-ke.onrender.com'; 
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
 async function request(path, options = {}) {
   const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -12,7 +12,7 @@ async function request(path, options = {}) {
     if (response.status === 401 && typeof window !== 'undefined') {
       window.localStorage.removeItem('casaconnect_session');
       const path = window.location.pathname;
-      const loginPath = path.startsWith('/admin') ? '/admin/login' : path.startsWith('/landlord') ? '/landlord/login' : '/user/login';
+      const loginPath = path.startsWith('/admin') ? '/admin/login' : path.startsWith('/landlord') ? '/landlord/login' : '/tenant/login';
       if (!path.endsWith('/login')) window.location.assign(loginPath);
     }
     throw new Error(payload.message || 'The request could not be completed.');
@@ -48,15 +48,6 @@ export async function getMyProperties(token) {
 
 export async function createProperty(data, token) {
   const payload = await request('/properties', {
-    method: 'POST',
-    headers: tokenHeader(token),
-    body: JSON.stringify(data),
-  });
-  return payload.property;
-}
-
-export async function createPropertyAsAdmin(data, token) {
-  const payload = await request('/admin/properties', {
     method: 'POST',
     headers: tokenHeader(token),
     body: JSON.stringify(data),
@@ -141,25 +132,11 @@ export async function loginUser(email, password) {
   return request('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) });
 }
 
-export async function requestPasswordReset(email) {
-  return request('/auth/forgot-password', {
-    method: 'POST',
-    body: JSON.stringify({ email }),
-  });
+export async function signupUser(name, email, password, role, phone = '') {
+  return request('/auth/signup', { method: 'POST', body: JSON.stringify({ name, email, password, role, phone }) });
 }
 
-export async function resetPassword(email, password) {
-  return request('/auth/reset-password', {
-    method: 'POST',
-    body: JSON.stringify({ email, password }),
-  });
-}
-
-export async function signupUser(name, email, password, role) {
-  return request('/auth/signup', { method: 'POST', body: JSON.stringify({ name, email, password, role }) });
-}
-
-export async function createLandlord(name, email, password, phone, token) {
+export async function createLandlord(name, email, password, token, phone = '') {
   return request('/auth/landlords', {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
@@ -199,13 +176,56 @@ export async function updateAdminResource(resource, id, updates, token) {
   });
 }
 
+export async function getAdminLandlords(token) {
+  const payload = await request('/admin/landlords', { headers: { Authorization: `Bearer ${token}` } });
+  return payload.landlords || [];
+}
+
+export async function getAdminRequests(token) {
+  const payload = await request('/admin/requests', { headers: { Authorization: `Bearer ${token}` } });
+  return payload.requests || [];
+}
+
+export async function getAdminMessages(token) {
+  const payload = await request('/admin/messages', { headers: { Authorization: `Bearer ${token}` } });
+  return payload.messages || [];
+}
+
+export async function updateAdminRequest(id, status, token) {
+  return request(`/admin/requests/${id}`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ status }),
+  });
+}
+
+export async function deleteAdminResource(resource, id, token) {
+  return request(`/admin/${resource}/${id}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+export async function forgotPassword(email) {
+  return request('/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) });
+}
+
+export async function resetPassword(access_token, password) {
+  return request('/auth/reset-password', { method: 'POST', body: JSON.stringify({ access_token, password }) });
+}
+
+export async function updateProfile(updates, token) {
+  return request('/auth/profile', {
+    method: 'PATCH',
+    headers: tokenHeader(token),
+    body: JSON.stringify(updates),
+  });
+}
+
 // Supabase realtime client for live message updates.
 export function createRealtimeClient(supabaseSession) {
-  const key =
-    process.env.REACT_APP_SUPABASE_ANON_KEY ||
-    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd2YXZ6YXVpYWZsdHBjaGxya2lvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc2ODY4NTksImV4cCI6MjEwMzI2Mjg1OX0.bUacwmuRbxsvZV_NA6lRFnkDpc_WnoQBrHARDYQBxmc';
-  const url =
-    process.env.REACT_APP_SUPABASE_URL || 'https://gvavzauiafltpchlrkio.supabase.co';
+  const key = process.env.REACT_APP_SUPABASE_ANON_KEY;
+  const url = process.env.REACT_APP_SUPABASE_URL;
 
   try {
     const options = supabaseSession?.access_token

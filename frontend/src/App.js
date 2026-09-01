@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { BrowserRouter, Link, NavLink, Navigate, Route, Routes, useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -12,7 +12,6 @@ import {
   FileText,
   Home,
   LayoutDashboard,
-  LogOut,
   MapPin,
   MessageSquareText,
   Pencil,
@@ -30,9 +29,16 @@ import {
 } from 'lucide-react';
 import { Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import {
+  getAdminLandlords,
+  getAdminMessages,
+  getAdminRequests,
+  updateAdminRequest,
+  deleteAdminResource,
+  forgotPassword,
+  resetPassword,
   createLandlord,
+  createPayment,
   createProperty,
-  createPropertyAsAdmin,
   createRentalRequest,
   createRealtimeClient,
   createReview,
@@ -48,22 +54,162 @@ import {
   getRentalRequests,
   getReviews,
   loginUser,
-  requestPasswordReset,
   sendMessage,
   signupUser,
   updateAdminResource,
+  updateProfile,
   updateProperty,
   updateRentalRequest,
 } from './api';
 import './App.css';
 
+const LOGO = process.env.PUBLIC_URL + '/casaconnect-logo.png';
+
+function SplashScreen({ onDone }) {
+  useEffect(() => {
+    const t = setTimeout(onDone, 2600);
+    return () => clearTimeout(t);
+  }, [onDone]);
+  return (
+    <div className="splash">
+      <div className="splash-inner">
+        <img src={LOGO} alt="CasaConnect" className="splash-logo" />
+        <h1 className="splash-title">CasaConnect</h1>
+        <p className="splash-sub">Rent smarter, live better.</p>
+        <div className="splash-bar"><span /></div>
+      </div>
+    </div>
+  );
+}
+
+function Skeleton({ width, height, radius, style }) {
+  return <span className="skeleton" style={{ width, height, borderRadius: radius ?? 10, display: 'block', ...style }} />;
+}
+
+function SkeletonCard() {
+  return (
+    <div className="property-card">
+      <Skeleton height={160} radius={0} />
+      <div className="property-body" style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+        <Skeleton height={16} width="70%" />
+        <Skeleton height={12} width="50%" />
+        <Skeleton height={12} width="40%" />
+        <Skeleton height={36} />
+      </div>
+    </div>
+  );
+}
+
+function SkeletonRow() {
+  return (
+    <div className="list-row" style={{ gap: '0.8rem' }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+        <Skeleton height={14} width="60%" />
+        <Skeleton height={11} width="40%" />
+      </div>
+      <Skeleton height={24} width={70} radius={999} />
+    </div>
+  );
+}
+
+const FAQ = [
+  { q: 'How do I submit a rental request?', a: 'Browse Properties, open a listing, write a short intro and click "Send rental request".' },
+  { q: 'How long does approval take?', a: 'Landlords typically respond within 24–48 hours. Track status under Requests.' },
+  { q: 'Can I message a landlord directly?', a: 'Yes — once you send a request, the Messages tab opens a live chat with the landlord.' },
+  { q: 'How do I update my profile?', a: 'Go to Profile in the sidebar, fill in your details and click Save profile.' },
+  { q: 'What payment methods are supported?', a: 'M-Pesa, Stripe, and bank transfer are all supported when recording a payment.' },
+  { q: 'How do I list a property?', a: 'Go to Properties → Add a property. Your listing is reviewed by admin before going live.' },
+  { q: 'How do I approve a tenant request?', a: 'Open Requests in your sidebar, find the request and click Approve.' },
+  { q: 'Can I edit a listing after publishing?', a: 'Yes — click Edit next to any property in your Properties list.' },
+];
+
+function SupportWidget() {
+  const [open, setOpen] = useState(false);
+  const [view, setView] = useState('home');
+  const [active, setActive] = useState(null);
+  const [messages, setMessages] = useState([{ from: 'bot', text: 'Hi! How can we help you today?' }]);
+  const [draft, setDraft] = useState('');
+  const bottomRef = useRef(null);
+
+  useEffect(() => {
+    if (bottomRef.current) bottomRef.current.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, open]);
+
+  const sendMessage = (e) => {
+    e.preventDefault();
+    if (!draft.trim()) return;
+    const userMsg = draft.trim();
+    setDraft('');
+    setMessages((prev) => [...prev, { from: 'user', text: userMsg }]);
+    setTimeout(() => {
+      const lower = userMsg.toLowerCase();
+      const match = FAQ.find((f) => f.q.toLowerCase().split(' ').some((w) => w.length > 3 && lower.includes(w)));
+      const reply = match ? match.a : 'Thanks for reaching out! Our team will follow up via email within 24 hours.';
+      setMessages((prev) => [...prev, { from: 'bot', text: reply }]);
+    }, 700);
+  };
+
+  return (
+    <>
+      <button className="support-fab" onClick={() => setOpen((o) => !o)} aria-label="Support">
+        {open ? '✕' : '💬'}
+      </button>
+      {open && (
+        <div className="support-widget">
+          <div className="support-header">
+            <img src={LOGO} alt="" className="support-logo" />
+            <div>
+              <strong>CasaConnect Support</strong>
+              <small>We usually reply instantly</small>
+            </div>
+          </div>
+          {view === 'home' && (
+            <div className="support-home">
+              <p className="support-greeting">👋 Hi there! How can we help?</p>
+              <button className="support-option" onClick={() => setView('faq')}><span>📖</span><span>Browse FAQs</span></button>
+              <button className="support-option" onClick={() => setView('chat')}><span>💬</span><span>Chat with us</span></button>
+            </div>
+          )}
+          {view === 'faq' && (
+            <div className="support-faq">
+              <button className="support-back" onClick={() => { setView('home'); setActive(null); }}>← Back</button>
+              {FAQ.map((item, i) => (
+                <div key={i} className="faq-item">
+                  <button className="faq-q" onClick={() => setActive(active === i ? null : i)}>
+                    {item.q}<span>{active === i ? '▲' : '▼'}</span>
+                  </button>
+                  {active === i && <p className="faq-a">{item.a}</p>}
+                </div>
+              ))}
+            </div>
+          )}
+          {view === 'chat' && (
+            <div className="support-chat">
+              <button className="support-back" onClick={() => setView('home')}>← Back</button>
+              <div className="support-messages">
+                {messages.map((m, i) => (
+                  <div key={i} className={`support-msg ${m.from}`}>{m.text}</div>
+                ))}
+                <div ref={bottomRef} />
+              </div>
+              <form className="support-composer" onSubmit={sendMessage}>
+                <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Type a message…" />
+                <button type="submit" className="primary-button small-button">Send</button>
+              </form>
+            </div>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
 const userNav = [
-  { label: 'Home', to: '/user', icon: Home },
-  { label: 'Properties', to: '/user/properties', icon: Building2 },
-  { label: 'Requests', to: '/user/requests', icon: FileCheck2 },
-  { label: 'Payments', to: '/user/payments', icon: Wallet },
-  { label: 'Messages', to: '/user/messages', icon: MessageSquareText },
-  { label: 'Profile', to: '/user/profile', icon: UserCircle2 },
+  { label: 'Home', to: '/tenant', icon: Home },
+  { label: 'Properties', to: '/tenant/properties', icon: Building2 },
+  { label: 'Requests', to: '/tenant/requests', icon: FileCheck2 },
+  { label: 'Messages', to: '/tenant/messages', icon: MessageSquareText },
+  { label: 'Profile', to: '/tenant/profile', icon: UserCircle2 },
 ];
 
 const adminNav = [
@@ -72,6 +218,8 @@ const adminNav = [
   { label: 'Users', to: '/admin/users', icon: Users },
   { label: 'Landlords', to: '/admin/landlords', icon: UserCog },
   { label: 'Properties', to: '/admin/properties', icon: Building2 },
+  { label: 'Requests', to: '/admin/requests', icon: FileCheck2 },
+  { label: 'Messages', to: '/admin/messages', icon: MessageSquareText },
   { label: 'Reviews', to: '/admin/reviews', icon: Star },
   { label: 'Settings', to: '/admin/settings', icon: Settings },
 ];
@@ -81,20 +229,9 @@ const landlordNav = [
   { label: 'Properties', to: '/landlord/properties', icon: Building2 },
   { label: 'Requests', to: '/landlord/requests', icon: FileCheck2 },
   { label: 'Messages', to: '/landlord/messages', icon: MessageSquareText },
-  { label: 'Payments', to: '/landlord/payments', icon: Wallet },
 ];
 
 const SESSION_KEY = 'casaconnect_session';
-const SUPPORT_PHONE = '0102686169';
-const MAX_RENT_AMOUNT = 9999999999.99;
-
-// function validateRentAmount(value) {
-//   const numberValue = Number(value);
-//   if (!Number.isFinite(numberValue) || numberValue <= 0 || numberValue > MAX_RENT_AMOUNT) {
-//     throw new Error('Rent must be a valid positive amount under 10,000,000,000.');
-//   }
-//   return numberValue;
-// }
 
 function getStoredSession() {
   if (typeof window === 'undefined') {
@@ -127,35 +264,22 @@ function saveSession(session) {
 
 function getPortalHome(role) {
   switch (role) {
-    case 'admin':
-      return '/admin';
-    case 'landlord':
-      return '/landlord';
+    case 'admin': return '/admin';
+    case 'landlord': return '/landlord';
     case 'tenant':
-    default:
-      return '/user';
+    default: return '/tenant';
   }
-}
-
-function BrandLogo({ compact = false }) {
-  return (
-    <img
-      src="/casaconnect-logo.png"
-      alt="CasaConnect logo"
-      className={compact ? 'brand-logo compact-brand-logo' : 'brand-logo'}
-    />
-  );
 }
 
 function ProtectedRoute({ allowedRoles, fallbackPath, children }) {
   const session = getStoredSession();
 
   if (!session?.token) {
-    return <Navigate to={fallbackPath || '/user/login'} replace />;
+    return <Navigate to={fallbackPath || '/tenant/login'} replace />;
   }
 
   if (allowedRoles && !allowedRoles.includes(session.user?.role)) {
-    const redirectPath = getPortalHome(session.user?.role) || fallbackPath || '/user/login';
+    const redirectPath = getPortalHome(session.user?.role) || fallbackPath || '/tenant/login';
     return <Navigate to={redirectPath} replace />;
   }
 
@@ -164,52 +288,19 @@ function ProtectedRoute({ allowedRoles, fallbackPath, children }) {
 
 function RootRedirect() {
   const session = getStoredSession();
-
-  if (!session?.token) {
-    return <Navigate to="/user/login" replace />;
-  }
-
+  if (!session?.token) return <Navigate to="/tenant/login" replace />;
   return <Navigate to={getPortalHome(session.user?.role)} replace />;
 }
 
-function PortalAccountActions({ profilePath, settingsPath, loginPath, userName }) {
-  const navigate = useNavigate();
-
-  const handleLogout = () => {
-    window.localStorage.removeItem(SESSION_KEY);
-    navigate(loginPath || '/', { replace: true });
-  };
-
-  return (
-    <div className="account-tools">
-      <Link className="ghost-button compact-button" to={profilePath}>
-        <UserCircle2 size={15} />
-        {userName || 'Profile'}
-      </Link>
-      <Link className="ghost-button compact-button" to={settingsPath}>
-        <Settings size={15} />
-        Settings
-      </Link>
-      <button type="button" className="ghost-button compact-button danger" onClick={handleLogout}>
-        <LogOut size={15} />
-        Logout
-      </button>
-    </div>
-  );
-}
-
 function UserShell({ title, subtitle, children }) {
-  const session = getStoredSession();
-  const userName = session?.user?.name || session?.user?.email?.split('@')[0] || 'Profile';
-
   return (
     <div className="portal-shell">
       <aside className="portal-sidebar">
         <div className="brand-block">
-          <BrandLogo />
+          <img src={LOGO} alt="CasaConnect" className="brand-logo" />
           <div>
             <strong>CasaConnect</strong>
-            <small>User portal</small>
+            <small>Tenant portal</small>
           </div>
         </div>
         <nav className="sidebar-nav">
@@ -221,8 +312,8 @@ function UserShell({ title, subtitle, children }) {
           ))}
         </nav>
         <div className="sidebar-card">
-          <p>Signed in as</p>
-          <strong>{userName}</strong>
+          <p>Tenant status</p>
+          <strong>Verified</strong>
           <span><ShieldCheck size={16} /> Secure profile active</span>
         </div>
       </aside>
@@ -231,7 +322,6 @@ function UserShell({ title, subtitle, children }) {
         <header className="topbar">
           <div>
             <p className="eyebrow">Tenant workspace</p>
-            <h1>{title}</h1>
           </div>
           <div className="topbar-actions">
             <div className="search-box">
@@ -242,13 +332,12 @@ function UserShell({ title, subtitle, children }) {
               <Bell size={18} />
               <span className="badge">2</span>
             </button>
-            <PortalAccountActions profilePath="/user/profile" settingsPath="/user/settings" loginPath="/user/login" userName={userName} />
           </div>
         </header>
 
         <div className="page-subhead">
           <p>{subtitle}</p>
-          <Link className="primary-button" to="/user/properties">
+          <Link className="primary-button" to="/tenant/properties">
             Browse homes
             <ArrowRight size={16} />
           </Link>
@@ -261,14 +350,11 @@ function UserShell({ title, subtitle, children }) {
 }
 
 function AdminShell({ title, subtitle, children }) {
-  const session = getStoredSession();
-  const userName = session?.user?.name || session?.user?.email?.split('@')[0] || 'Admin';
-
   return (
     <div className="portal-shell">
       <aside className="portal-sidebar">
         <div className="brand-block">
-          <BrandLogo />
+          <img src={LOGO} alt="CasaConnect" className="brand-logo" />
           <div>
             <strong>CasaConnect</strong>
             <small>Admin portal</small>
@@ -284,7 +370,7 @@ function AdminShell({ title, subtitle, children }) {
         </nav>
         <div className="sidebar-card">
           <p>System access</p>
-          <strong>{userName}</strong>
+          <strong>Admin</strong>
           <span><ShieldCheck size={16} /> RBAC enforced</span>
         </div>
       </aside>
@@ -304,7 +390,6 @@ function AdminShell({ title, subtitle, children }) {
               <Bell size={18} />
               <span className="badge">3</span>
             </button>
-            <PortalAccountActions profilePath="/admin/users" settingsPath="/admin/settings" loginPath="/admin/login" userName={userName} />
           </div>
         </header>
 
@@ -323,14 +408,11 @@ function AdminShell({ title, subtitle, children }) {
 }
 
 function LandlordShell({ title, subtitle, children }) {
-  const session = getStoredSession();
-  const userName = session?.user?.name || session?.user?.email?.split('@')[0] || 'Landlord';
-
   return (
     <div className="portal-shell">
       <aside className="portal-sidebar">
         <div className="brand-block">
-          <BrandLogo />
+          <img src={LOGO} alt="CasaConnect" className="brand-logo" />
           <div>
             <strong>CasaConnect</strong>
             <small>Landlord portal</small>
@@ -346,7 +428,7 @@ function LandlordShell({ title, subtitle, children }) {
         </nav>
         <div className="sidebar-card">
           <p>Landlord status</p>
-          <strong>{userName}</strong>
+          <strong>Approved</strong>
           <span><ShieldCheck size={16} /> Managed account active</span>
         </div>
       </aside>
@@ -366,7 +448,6 @@ function LandlordShell({ title, subtitle, children }) {
               <Bell size={18} />
               <span className="badge">1</span>
             </button>
-            <PortalAccountActions profilePath="/landlord" settingsPath="/landlord/properties" loginPath="/landlord/login" userName={userName} />
           </div>
         </header>
 
@@ -402,11 +483,17 @@ function UserDashboardPage() {
   const [properties, setProperties] = useState([]);
   const [requests, setRequests] = useState([]);
   const [payments, setPayments] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    getProperties().then(setProperties).catch(() => setProperties([]));
-    getRentalRequests(session?.token).then(setRequests).catch(() => setRequests([]));
-    getPayments(session?.token).then(setPayments).catch(() => setPayments([]));
+    setLoading(true);
+    Promise.all([
+      getProperties().catch(() => []),
+      getRentalRequests(session?.token).catch(() => []),
+      getPayments(session?.token).catch(() => []),
+    ]).then(([p, r, pay]) => {
+      setProperties(p); setRequests(r); setPayments(pay);
+    }).finally(() => setLoading(false));
   }, [session?.token]);
 
   return (
@@ -425,10 +512,10 @@ function UserDashboardPage() {
               <p className="eyebrow">Favorites</p>
               <h3>Recommended homes</h3>
             </div>
-            <Link to="/user/properties" className="text-link">View all</Link>
+            <Link to="/tenant/properties" className="text-link">View all</Link>
           </div>
           <div className="property-grid compact-grid">
-            {properties.slice(0, 3).map((property) => (
+            {loading ? [1,2].map((k) => <SkeletonCard key={k} />) : properties.slice(0, 3).map((property) => (
               <article className="property-card" key={property.id}>
                 <div className="property-image-placeholder" aria-hidden="true"><Building2 size={28} /></div>
                 <div className="property-body">
@@ -443,7 +530,7 @@ function UserDashboardPage() {
                   </div>
                   <div className="property-footer">
                     <strong>${Number(property.rent || property.price || 0).toLocaleString()}</strong>
-                    <Link to="/user/properties" className="ghost-button">View</Link>
+                    <Link to="/tenant/properties" className="ghost-button">View</Link>
                   </div>
                 </div>
               </article>
@@ -459,7 +546,7 @@ function UserDashboardPage() {
             </div>
           </div>
           <div className="list-stack">
-            {requests.slice(0, 5).map((request) => (
+            {loading ? [1,2,3].map((k) => <SkeletonRow key={k} />) : requests.slice(0, 5).map((request) => (
               <div className="list-row" key={request.id}>
                 <div>
                   <strong>{request.properties?.title || 'Property request'}</strong>
@@ -479,14 +566,17 @@ function UserPropertiesPage() {
   const [properties, setProperties] = useState([]);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({ q: '', city: '', maxRent: '', bedrooms: '' });
   const session = getStoredSession();
 
   const loadProperties = () => {
     setError('');
+    setLoading(true);
     getProperties({ token: session?.token, ...filters })
       .then(setProperties)
-      .catch((loadError) => setError(loadError.message));
+      .catch((loadError) => setError(loadError.message))
+      .finally(() => setLoading(false));
   };
 
   useEffect(loadProperties, [filters, session?.token]);
@@ -554,12 +644,12 @@ function UserPropertiesPage() {
       {notice && <p className="auth-success">{notice}</p>}
       {error && <p className="auth-error">{error}</p>}
       <div className="property-grid">
-        {properties.map((property) => {
+        {loading ? [1,2,3,4,5,6].map((k) => <SkeletonCard key={k} />) : properties.map((property) => {
           const averageRating = property.average_rating || 0;
           return (
             <article className="property-card" key={property.id}>
-              <Link to={`/user/properties/${property.id}`} className="property-image-placeholder" aria-label={`View ${property.title}`}>
-                {property.image_url ? <img src={property.image_url} alt={property.title} /> : <Building2 size={28} />}
+              <Link to={`/tenant/properties/${property.id}`} className="property-image-placeholder" aria-label={`View ${property.title}`}>
+                <Building2 size={28} />
               </Link>
               <div className="property-body">
                 <div className="property-row">
@@ -574,7 +664,7 @@ function UserPropertiesPage() {
                 </div>
                 <div className="property-footer">
                   <strong>{Number(property.rent || property.price || 0).toLocaleString()} KES</strong>
-                  <Link to={`/user/properties/${property.id}`} className="ghost-button">View</Link>
+                  <Link to={`/tenant/properties/${property.id}`} className="ghost-button">View</Link>
                   <button type="button" className="primary-button small-button" onClick={() => handleRequest(property.id)}>Request</button>
                 </div>
               </div>
@@ -595,6 +685,7 @@ function UserPropertyDetailsPage() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [requestMessage, setRequestMessage] = useState('');
 
   const loadData = () => {
     Promise.all([getProperty(id, session?.token), getReviews(id)])
@@ -607,13 +698,15 @@ function UserPropertyDetailsPage() {
 
   useEffect(loadData, [id, session?.token]);
 
-  const handleRequest = async () => {
+  const handleRequest = async (event) => {
+    event.preventDefault();
     setSubmitting(true);
     setError('');
     setNotice('');
     try {
-      await createRentalRequest(id, `I am interested in ${property.title}.`, session?.token);
+      await createRentalRequest(id, requestMessage.trim() || `I am interested in ${property.title}.`, session?.token);
       setNotice('Your rental request was sent. The landlord has been notified.');
+      setRequestMessage('');
     } catch (requestError) {
       setError(requestError.message || 'Unable to send the rental request.');
     } finally {
@@ -653,9 +746,7 @@ function UserPropertyDetailsPage() {
     >
       <div className="detail-grid">
         <div className="detail-main">
-          <div className="property-hero" aria-hidden="true">
-            {property.image_url ? <img src={property.image_url} alt={property.title} /> : <Building2 size={64} />}
-          </div>
+          <div className="property-hero" aria-hidden="true"><Building2 size={64} /></div>
 
           <div className="panel">
             <div className="panel-header">
@@ -720,12 +811,21 @@ function UserPropertyDetailsPage() {
             <div className="price-display">{Number(property.rent).toLocaleString()} KES</div>
             <div className="meta-row">Available from {new Date(property.available_from).toLocaleDateString()}</div>
             {session?.user?.role === 'tenant' && (
-              <button type="button" className="primary-button full-width-button" onClick={handleRequest} disabled={submitting}>
-                <Home size={16} /> {submitting ? 'Sending…' : 'Send rental request'}
-              </button>
+              <form onSubmit={handleRequest} style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', marginTop: '0.8rem' }}>
+                <textarea
+                  rows="3"
+                  value={requestMessage}
+                  onChange={(e) => setRequestMessage(e.target.value)}
+                  placeholder="Introduce yourself and ask any questions…"
+                  style={{ resize: 'vertical' }}
+                />
+                <button type="submit" className="primary-button full-width-button" disabled={submitting}>
+                  <Home size={16} /> {submitting ? 'Sending…' : 'Send rental request'}
+                </button>
+              </form>
             )}
             {session?.user?.role === 'tenant' && (
-              <Link to={`/user/messages?property=${id}`} className="ghost-button full-width-button">
+              <Link to={`/tenant/messages?property=${id}`} className="ghost-button full-width-button" style={{ marginTop: '0.4rem' }}>
                 <MessageSquareText size={16} /> Contact landlord
               </Link>
             )}
@@ -815,17 +915,101 @@ function UserRequestsPage() {
 
 function UserPaymentsPage() {
   const [payments, setPayments] = useState([]);
+  const [properties, setProperties] = useState([]);
+  const [form, setForm] = useState({ property_id: '', amount: '', currency: 'KES', method: 'mpesa', provider_reference: '' });
+  const [notice, setNotice] = useState('');
+  const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
   const session = getStoredSession();
-  useEffect(() => { getPayments(session?.token).then(setPayments).catch(() => setPayments([])); }, [session?.token]);
+
+  const loadPayments = () => getPayments(session?.token).then(setPayments).catch(() => setPayments([]));
+
+  useEffect(() => {
+    loadPayments();
+    getProperties().then(setProperties).catch(() => setProperties([]));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.token]);
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    setSubmitting(true);
+    setNotice('');
+    setError('');
+    try {
+      await createPayment(form.property_id, form.amount, session?.token, {
+        currency: form.currency,
+        method: form.method,
+        provider_reference: form.provider_reference.trim() || undefined,
+      });
+      setNotice('Payment recorded successfully.');
+      setForm({ property_id: '', amount: '', currency: 'KES', method: 'mpesa', provider_reference: '' });
+      loadPayments();
+    } catch (payError) {
+      setError(payError.message || 'Unable to record payment.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <UserShell title="Payments" subtitle="Monitor rent payments, transaction history, and your payment methods.">
+      <div className="panel create-panel" style={{ marginBottom: '1rem' }}>
+        <div className="panel-header compact">
+          <div>
+            <p className="eyebrow">New payment</p>
+            <h3>Record a rent payment</h3>
+          </div>
+        </div>
+        <form onSubmit={handleSubmit}>
+          <div className="form-grid">
+            <label>
+              Property *
+              <select value={form.property_id} onChange={(e) => setForm({ ...form, property_id: e.target.value })} required>
+                <option value="">Select a property</option>
+                {properties.map((p) => <option key={p.id} value={p.id}>{p.title}</option>)}
+              </select>
+            </label>
+            <label>
+              Amount (KES) *
+              <input type="number" min="1" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} required placeholder="45000" />
+            </label>
+            <label>
+              Currency
+              <select value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })}>
+                <option value="KES">KES</option>
+                <option value="USD">USD</option>
+              </select>
+            </label>
+            <label>
+              Payment method *
+              <select value={form.method} onChange={(e) => setForm({ ...form, method: e.target.value })} required>
+                <option value="mpesa">M-Pesa</option>
+                <option value="stripe">Stripe</option>
+                <option value="bank_transfer">Bank transfer</option>
+                <option value="other">Other</option>
+              </select>
+            </label>
+            <label className="form-span-two">
+              Provider reference (optional)
+              <input value={form.provider_reference} onChange={(e) => setForm({ ...form, provider_reference: e.target.value })} placeholder="M-Pesa transaction code, Stripe charge ID, etc." />
+            </label>
+          </div>
+          {notice && <p className="auth-success" style={{ marginTop: '0.8rem' }}>{notice}</p>}
+          {error && <p className="auth-error" style={{ marginTop: '0.8rem' }}>{error}</p>}
+          <button type="submit" className="primary-button" style={{ marginTop: '0.8rem' }} disabled={submitting}>
+            {submitting ? 'Recording…' : 'Record payment'} <CreditCard size={15} />
+          </button>
+        </form>
+      </div>
+
       <div className="panel table-panel">
         <table>
           <thead>
             <tr>
-              <th>Month</th>
+              <th>Date</th>
               <th>Amount</th>
               <th>Method</th>
+              <th>Reference</th>
               <th>Status</th>
             </tr>
           </thead>
@@ -835,6 +1019,7 @@ function UserPaymentsPage() {
                 <td>{new Date(payment.created_at).toLocaleDateString()}</td>
                 <td>{payment.currency} {Number(payment.amount).toLocaleString()}</td>
                 <td>{payment.method}</td>
+                <td>{payment.provider_reference || '—'}</td>
                 <td><span className={`status-pill ${payment.status}`}>{payment.status}</span></td>
               </tr>
             ))}
@@ -952,6 +1137,26 @@ function UserMessagesPage() {
 function UserProfilePage() {
   const session = getStoredSession();
   const user = session?.user || {};
+  const [form, setForm] = useState({ full_name: user.name || '', phone: '', preferred_area: '', company: '' });
+  const [notice, setNotice] = useState('');
+  const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSave = async (event) => {
+    event.preventDefault();
+    setSubmitting(true);
+    setNotice('');
+    setError('');
+    try {
+      await updateProfile(form, session?.token);
+      setNotice('Profile updated successfully.');
+    } catch (saveError) {
+      setError(saveError.message || 'Unable to save profile.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <UserShell title="Profile" subtitle="Manage contact details, tenant preferences, and account verification.">
       <div className="settings-grid">
@@ -962,24 +1167,37 @@ function UserProfilePage() {
               <h3>Personal details</h3>
             </div>
           </div>
-          <div className="form-grid">
-            <label>
-              Full name
-              <input defaultValue={user.name || ''} placeholder="Your full name" />
-            </label>
-            <label>
-              Email
-              <input defaultValue={user.email || ''} readOnly />
-            </label>
-            <label>
-              Phone
-              <input placeholder="Add phone number" />
-            </label>
-            <label>
-              Preferred area
-              <input placeholder="Preferred area" />
-            </label>
-          </div>
+          <form onSubmit={handleSave}>
+            <div className="form-grid">
+              <label>
+                Full name
+                <input value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} placeholder="Your full name" />
+              </label>
+              <label>
+                Email
+                <input defaultValue={user.email || ''} readOnly />
+              </label>
+              <label>
+                Phone
+                <input type="tel" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="e.g. 0712345678" />
+              </label>
+              <label>
+                Preferred area
+                <input value={form.preferred_area} onChange={(e) => setForm({ ...form, preferred_area: e.target.value })} placeholder="e.g. Kilimani" />
+              </label>
+              <label>
+                Company
+                <input value={form.company} onChange={(e) => setForm({ ...form, company: e.target.value })} placeholder="Company or employer (optional)" />
+              </label>
+            </div>
+            {notice && <p className="auth-success" style={{ marginTop: '1rem' }}>{notice}</p>}
+            {error && <p className="auth-error" style={{ marginTop: '1rem' }}>{error}</p>}
+            <div className="form-actions" style={{ marginTop: '1rem' }}>
+              <button type="submit" className="primary-button" disabled={submitting}>
+                {submitting ? 'Saving…' : 'Save profile'}
+              </button>
+            </div>
+          </form>
         </div>
 
         <div className="panel">
@@ -1000,38 +1218,12 @@ function UserProfilePage() {
   );
 }
 
-function UserSettingsPage() {
-  return <UserProfilePage />;
-}
-
-function AuthRecoveryRow({ email, onEmailChange, onRequest, notice, error, loading }) {
-  return (
-    <div className="auth-recovery">
-      <div className="helper-row recovery-row">
-        <button type="button" className="text-link-button" onClick={onRequest} disabled={loading}>
-          Forgot your password?
-        </button>
-        <span>Support: {SUPPORT_PHONE}</span>
-      </div>
-      {notice && <p className="auth-success">{notice}</p>}
-      {error && <p className="auth-error">{error}</p>}
-      <label className="recovery-email">
-        Recovery email
-        <input type="email" value={email} onChange={(event) => onEmailChange(event.target.value)} placeholder="Enter your email to reset" />
-      </label>
-    </div>
-  );
-}
-
 function UserAuthPage() {
   const navigate = useNavigate();
   const [mode, setMode] = useState('login');
   const [submitting, setSubmitting] = useState(false);
-  const [recoveryLoading, setRecoveryLoading] = useState(false);
-  const [recoveryNotice, setRecoveryNotice] = useState('');
-  const [recoveryError, setRecoveryError] = useState('');
   const [error, setError] = useState('');
-  const [form, setForm] = useState({ name: '', email: '', password: '' });
+  const [form, setForm] = useState({ name: '', email: '', password: '', phone: '' });
 
   useEffect(() => {
     const session = getStoredSession();
@@ -1039,29 +1231,6 @@ function UserAuthPage() {
       navigate(getPortalHome(session.user?.role), { replace: true });
     }
   }, [navigate]);
-
-  const handleRecoveryRequest = async () => {
-    const emailToUse = form.email.trim();
-    if (!emailToUse) {
-      setRecoveryError('Enter your email to receive recovery instructions.');
-      return;
-    }
-
-    try {
-      setRecoveryLoading(true);
-      setRecoveryError('');
-      setRecoveryNotice('');
-      const payload = await requestPasswordReset(emailToUse);
-      setRecoveryNotice(payload.message || 'Password reset instructions were sent.');
-      if (payload.supportPhone) {
-        setRecoveryNotice(`${payload.message} Support: ${payload.supportPhone}`);
-      }
-    } catch (submitError) {
-      setRecoveryError(submitError.message || 'Unable to process the password reset request.');
-    } finally {
-      setRecoveryLoading(false);
-    }
-  };
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -1071,14 +1240,14 @@ function UserAuthPage() {
     try {
       const payload = mode === 'login'
         ? await loginUser(form.email, form.password)
-        : await signupUser(form.name, form.email, form.password, 'tenant');
+        : await signupUser(form.name, form.email, form.password, 'tenant', form.phone);
 
       if (payload.user?.role !== 'tenant') {
         throw new Error('This account is not registered as a tenant.');
       }
 
       saveSession({ token: payload.token, user: payload.user });
-      navigate('/user', { replace: true });
+      navigate('/tenant', { replace: true });
     } catch (submitError) {
       setError(submitError.message || 'Authentication failed.');
     } finally {
@@ -1090,7 +1259,7 @@ function UserAuthPage() {
     <div className="auth-shell">
       <div className="auth-panel hero-panel">
         <div className="brand-block">
-          <BrandLogo />
+          <img src={LOGO} alt="CasaConnect" className="brand-logo" />
           <div>
             <strong>CasaConnect</strong>
             <small>Tenant access</small>
@@ -1117,6 +1286,13 @@ function UserAuthPage() {
             </label>
           )}
 
+          {mode === 'register' && (
+            <label>
+              Phone number
+              <input type="tel" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} placeholder="e.g. 0712345678" />
+            </label>
+          )}
+
           <label>
             Email address
             <input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} />
@@ -1134,21 +1310,123 @@ function UserAuthPage() {
             <ArrowRight size={16} />
           </button>
 
-          {mode === 'login' && (
-            <AuthRecoveryRow
-              email={form.email}
-              onEmailChange={(value) => setForm({ ...form, email: value })}
-              onRequest={handleRecoveryRequest}
-              notice={recoveryNotice}
-              error={recoveryError}
-              loading={recoveryLoading}
-            />
-          )}
-
           <div className="helper-row">
             <span>Use tenant access</span>
-            <span>Role: tenant</span>
+            <Link to="/tenant/forgot-password" className="text-link">Forgot password?</Link>
           </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function ForgotPasswordPage({ portal = 'tenant' }) {
+  const [email, setEmail] = useState('');
+  const [notice, setNotice] = useState('');
+  const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const loginPath = portal === 'admin' ? '/admin/login' : portal === 'landlord' ? '/landlord/login' : '/tenant/login';
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSubmitting(true); setNotice(''); setError('');
+    try {
+      await forgotPassword(email);
+      setNotice('Check your email — a reset link has been sent.');
+    } catch (err) {
+      setError(err.message || 'Unable to send reset email.');
+    } finally { setSubmitting(false); }
+  };
+
+  return (
+    <div className="auth-shell">
+      <div className="auth-panel hero-panel">
+        <div className="brand-block">
+          <img src={LOGO} alt="CasaConnect" className="brand-logo" />
+          <div><strong>CasaConnect</strong><small>Password recovery</small></div>
+        </div>
+        <div>
+          <p className="eyebrow">Account recovery</p>
+          <h1>Reset your password.</h1>
+        </div>
+        <p className="quote">Enter your email and we'll send you a secure link to set a new password.</p>
+      </div>
+      <div className="auth-panel form-panel">
+        <form className="auth-form" onSubmit={handleSubmit}>
+          <p className="eyebrow">Forgot password</p>
+          <h2>Send reset link</h2>
+          <label>
+            Email address
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+          </label>
+          {notice && <p className="auth-success">{notice}</p>}
+          {error && <p className="auth-error">{error}</p>}
+          <button type="submit" className="primary-button full-width-button" disabled={submitting}>
+            {submitting ? 'Sending…' : 'Send reset link'}<ArrowRight size={16} />
+          </button>
+          <div className="helper-row">
+            <Link to={loginPath} className="text-link">← Back to login</Link>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function ResetPasswordPage() {
+  const [params] = useState(() => new URLSearchParams(window.location.hash.replace('#', '?')));
+  const accessToken = params.get('access_token');
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [notice, setNotice] = useState('');
+  const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const navigate = useNavigate();
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (password !== confirm) { setError('Passwords do not match.'); return; }
+    if (!accessToken) { setError('Invalid or expired reset link. Please request a new one.'); return; }
+    setSubmitting(true); setNotice(''); setError('');
+    try {
+      await resetPassword(accessToken, password);
+      setNotice('Password updated! Redirecting to login…');
+      setTimeout(() => navigate('/tenant/login', { replace: true }), 2000);
+    } catch (err) {
+      setError(err.message || 'Unable to reset password.');
+    } finally { setSubmitting(false); }
+  };
+
+  return (
+    <div className="auth-shell">
+      <div className="auth-panel hero-panel">
+        <div className="brand-block">
+          <img src={LOGO} alt="CasaConnect" className="brand-logo" />
+          <div><strong>CasaConnect</strong><small>Set new password</small></div>
+        </div>
+        <div>
+          <p className="eyebrow">Almost there</p>
+          <h1>Choose a new password.</h1>
+        </div>
+        <p className="quote">Pick a strong password — at least 6 characters.</p>
+      </div>
+      <div className="auth-panel form-panel">
+        <form className="auth-form" onSubmit={handleSubmit}>
+          <p className="eyebrow">Reset password</p>
+          <h2>New password</h2>
+          <label>
+            New password
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} />
+          </label>
+          <label>
+            Confirm password
+            <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} required />
+          </label>
+          {notice && <p className="auth-success">{notice}</p>}
+          {error && <p className="auth-error">{error}</p>}
+          <button type="submit" className="primary-button full-width-button" disabled={submitting || !accessToken}>
+            {submitting ? 'Saving…' : 'Set new password'}<ArrowRight size={16} />
+          </button>
         </form>
       </div>
     </div>
@@ -1380,11 +1658,8 @@ function AdminUsersPage() {
   const [error, setError] = useState('');
   const session = getStoredSession();
 
-  const loadUsers = () => {
-    getAdminData('users', session?.token).then(setUsers).catch((loadError) => setError(loadError.message));
-  };
-
-  useEffect(loadUsers, [session?.token]);
+  const loadUsers = () => { getAdminData('users', session?.token).then(setUsers).catch((e) => setError(e.message)); };
+  useEffect(() => { loadUsers(); }, [session?.token]);
 
   const toggleStatus = async (user) => {
     setNotice('');
@@ -1470,14 +1745,6 @@ function AdminUsersPage() {
   );
 }
 
-function LiveAdminTable({ resource, title, subtitle, columns, embedded = false }) {
-  const [rows, setRows] = useState([]);
-  const session = getStoredSession();
-  useEffect(() => { getAdminData(resource, session?.token).then(setRows).catch(() => setRows([])); }, [resource, session?.token]);
-  const content = <div className="panel table-panel"><table><thead><tr>{columns.map((column) => <th key={column}>{column.replace(/_/g, ' ')}</th>)}</tr></thead><tbody>{rows.map((row) => <tr key={row.id}>{columns.map((column) => <td key={column}>{column.includes('status') ? <span className={`status-pill ${row[column]}`}>{row[column]}</span> : String(row[column] ?? '')}</td>)}</tr>)}</tbody></table>{!rows.length && <p className="empty-state">No records found.</p>}</div>;
-  return embedded ? content : <AdminShell title={title} subtitle={subtitle}>{content}</AdminShell>;
-}
-
 function AdminLandlordsPage() {
   const [draft, setDraft] = useState({ name: '', company: '', email: '', phone: '', password: '' });
   const [notice, setNotice] = useState('');
@@ -1488,21 +1755,16 @@ function AdminLandlordsPage() {
     setNotice('');
     setError('');
 
-    const trimmedName = String(draft.name || '').trim();
-    const trimmedEmail = String(draft.email || '').trim();
-    const trimmedPhone = String(draft.phone || '').trim();
-    const trimmedPassword = String(draft.password || '');
-
-    if (!trimmedName || !trimmedEmail || !trimmedPhone || !trimmedPassword) {
-      setError('Name, email, phone, and password are required to create a landlord account.');
+    if (!draft.name || !draft.email || !draft.password) {
+      setError('Name, email, and password are required to create a landlord account.');
       return;
     }
 
     try {
       setSubmitting(true);
       const session = getStoredSession();
-      const payload = await createLandlord(trimmedName, trimmedEmail, trimmedPassword, trimmedPhone, session?.token);
-      setNotice(`Landlord account created successfully for ${payload.user?.name || trimmedName}.`);
+      const payload = await createLandlord(draft.name, draft.email, draft.password, session?.token, draft.phone);
+      setNotice(`Landlord account created successfully for ${payload.user?.name || draft.name}.`);
       setDraft({ name: '', company: '', email: '', phone: '', password: '' });
     } catch (submitError) {
       setError(submitError.message || 'Unable to create landlord account.');
@@ -1534,8 +1796,8 @@ function AdminLandlordsPage() {
             <input type="email" value={draft.email} onChange={(event) => setDraft({ ...draft, email: event.target.value })} placeholder="daniel@casaconnect.co" />
           </label>
           <label>
-            Phone number
-            <input type="tel" value={draft.phone} onChange={(event) => setDraft({ ...draft, phone: event.target.value })} placeholder="+254 712 345 678" />
+            Phone
+            <input type="tel" value={draft.phone} onChange={(event) => setDraft({ ...draft, phone: event.target.value })} placeholder="e.g. 0712345678" />
           </label>
           <label>
             Password
@@ -1550,7 +1812,7 @@ function AdminLandlordsPage() {
         {notice && <p className="auth-success">{notice}</p>}
       </div>
 
-      <LiveAdminTable resource="users" title="Landlords" subtitle="Landlord accounts created by administration." columns={['full_name', 'email', 'company', 'account_status']} embedded />
+      <LandlordsTable />
     </AdminShell>
   );
 }
@@ -1561,11 +1823,8 @@ function AdminPropertiesPage() {
   const [error, setError] = useState('');
   const session = getStoredSession();
 
-  const loadProperties = () => {
-    getAdminData('properties', session?.token).then(setProperties).catch((loadError) => setError(loadError.message));
-  };
-
-  useEffect(loadProperties, [session?.token]);
+  const loadProperties = () => { getAdminData('properties', session?.token).then(setProperties).catch((e) => setError(e.message)); };
+  useEffect(() => { loadProperties(); }, [session?.token]);
 
   const updateStatus = async (property, newStatus) => {
     setNotice('');
@@ -1583,12 +1842,6 @@ function AdminPropertiesPage() {
     <AdminShell title="Properties" subtitle="Approve, reject, or suspend housing listings submitted by landlords.">
       {notice && <p className="auth-success">{notice}</p>}
       {error && <p className="auth-error">{error}</p>}
-      <div className="page-subhead compact-subhead">
-        <div />
-        <Link className="primary-button" to="/admin/properties/new">
-          <Building2 size={16} /> Add property
-        </Link>
-      </div>
       <div className="panel table-panel">
         <table>
           <thead>
@@ -1653,17 +1906,139 @@ function AdminPropertiesPage() {
   );
 }
 
+function LandlordsTable() {
+  const [landlords, setLandlords] = useState([]);
+  const [notice, setNotice] = useState('');
+  const [error, setError] = useState('');
+  const session = getStoredSession();
+
+  const load = () => { getAdminLandlords(session?.token).then(setLandlords).catch((e) => setError(e.message)); };
+  useEffect(load, [session?.token]);
+
+  const remove = async (id, email) => {
+    if (!window.confirm(`Delete landlord ${email}?`)) return;
+    try {
+      await deleteAdminResource('users', id, session?.token);
+      setNotice(`Landlord ${email} deleted.`);
+      load();
+    } catch (e) { setError(e.message); }
+  };
+
+  return (
+    <div className="panel table-panel">
+      {notice && <p className="auth-success">{notice}</p>}
+      {error && <p className="auth-error">{error}</p>}
+      <table>
+        <thead><tr><th>Name</th><th>Email</th><th>Company</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody>
+          {landlords.map((l) => (
+            <tr key={l.id}>
+              <td>{l.full_name || '—'}</td>
+              <td>{l.email}</td>
+              <td>{l.company || '—'}</td>
+              <td><span className={`status-pill ${l.account_status || 'active'}`}>{l.account_status || 'active'}</span></td>
+              <td>
+                <button type="button" className="ghost-button compact-button danger" onClick={() => remove(l.id, l.email)}>
+                  <Trash2 size={14} /> Delete
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {!landlords.length && !error && <p className="empty-state">No landlord accounts yet.</p>}
+    </div>
+  );
+}
+
+function AdminRequestsPage() {
+  const [requests, setRequests] = useState([]);
+  const [notice, setNotice] = useState('');
+  const [error, setError] = useState('');
+  const session = getStoredSession();
+
+  const load = () => { getAdminRequests(session?.token).then(setRequests).catch((e) => setError(e.message)); };
+  useEffect(load, [session?.token]);
+
+  const update = async (id, status) => {
+    try {
+      await updateAdminRequest(id, status, session?.token);
+      setNotice(`Request marked as ${status}.`);
+      load();
+    } catch (e) { setError(e.message); }
+  };
+
+  return (
+    <AdminShell title="Requests" subtitle="Review all tenant rental requests across the platform.">
+      {notice && <p className="auth-success">{notice}</p>}
+      {error && <p className="auth-error">{error}</p>}
+      <div className="panel table-panel">
+        <table>
+          <thead><tr><th>Tenant</th><th>Property</th><th>Message</th><th>Date</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody>
+            {requests.map((r) => (
+              <tr key={r.id}>
+                <td>{r.users?.full_name || r.tenant_id}</td>
+                <td>{r.properties?.title || '—'}</td>
+                <td><small>{r.message || '—'}</small></td>
+                <td>{new Date(r.created_at).toLocaleDateString()}</td>
+                <td><span className={`status-pill ${r.status}`}>{r.status}</span></td>
+                <td>
+                  <div className="table-actions">
+                    {r.status !== 'approved' && <button type="button" className="ghost-button compact-button success" onClick={() => update(r.id, 'approved')}>Approve</button>}
+                    {r.status !== 'rejected' && <button type="button" className="ghost-button compact-button danger" onClick={() => update(r.id, 'rejected')}>Reject</button>}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {!requests.length && !error && <p className="empty-state">No rental requests yet.</p>}
+      </div>
+    </AdminShell>
+  );
+}
+
+function AdminMessagesPage() {
+  const [messages, setMessages] = useState([]);
+  const [error, setError] = useState('');
+  const session = getStoredSession();
+
+  useEffect(() => {
+    getAdminMessages(session?.token).then(setMessages).catch((e) => setError(e.message));
+  }, [session?.token]);
+
+  return (
+    <AdminShell title="Messages" subtitle="Monitor all property conversations across the platform.">
+      {error && <p className="auth-error">{error}</p>}
+      <div className="panel table-panel">
+        <table>
+          <thead><tr><th>Property</th><th>Sender</th><th>Message</th><th>Date</th></tr></thead>
+          <tbody>
+            {messages.map((m) => (
+              <tr key={m.id}>
+                <td>{m.properties?.title || '—'}</td>
+                <td>{m.users?.full_name || m.sender_id}</td>
+                <td><small>{m.message}</small></td>
+                <td>{new Date(m.created_at).toLocaleDateString()}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {!messages.length && !error && <p className="empty-state">No messages recorded yet.</p>}
+      </div>
+    </AdminShell>
+  );
+}
+
 function AdminReviewsPage() {
   const [reviews, setReviews] = useState([]);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const session = getStoredSession();
 
-  const loadReviews = () => {
-    getAdminData('reviews', session?.token).then(setReviews).catch((loadError) => setError(loadError.message));
-  };
-
-  useEffect(loadReviews, [session?.token]);
+  const loadReviews = () => { getAdminData('reviews', session?.token).then(setReviews).catch((e) => setError(e.message)); };
+  useEffect(() => { loadReviews(); }, [session?.token]);
 
   const moderateReview = async (review, status) => {
     setNotice('');
@@ -1796,8 +2171,6 @@ function AdminAuthPage() {
   const navigate = useNavigate();
   const [form, setForm] = useState({ email: '', password: '' });
   const [error, setError] = useState('');
-  const [recoveryNotice, setRecoveryNotice] = useState('');
-  const [recoveryError, setRecoveryError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -1806,26 +2179,6 @@ function AdminAuthPage() {
       navigate('/admin', { replace: true });
     }
   }, [navigate]);
-
-  const handleRecoveryRequest = async () => {
-    const emailToUse = form.email.trim();
-    if (!emailToUse) {
-      setRecoveryError('Enter your work email to receive recovery instructions.');
-      return;
-    }
-
-    try {
-      setRecoveryError('');
-      setRecoveryNotice('');
-      const payload = await requestPasswordReset(emailToUse);
-      setRecoveryNotice(payload.message || 'Reset instructions were sent.');
-      if (payload.supportPhone) {
-        setRecoveryNotice(`${payload.message} Support: ${payload.supportPhone}`);
-      }
-    } catch (submitError) {
-      setRecoveryError(submitError.message || 'Unable to process the password reset request.');
-    }
-  };
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -1851,7 +2204,7 @@ function AdminAuthPage() {
     <div className="auth-shell">
       <div className="auth-panel hero-panel">
         <div className="brand-block">
-          <BrandLogo />
+          <img src={LOGO} alt="CasaConnect" className="brand-logo" />
           <div>
             <strong>CasaConnect</strong>
             <small>Admin access</small>
@@ -1881,15 +2234,9 @@ function AdminAuthPage() {
             {submitting ? 'Signing in...' : 'Enter admin portal'}
             <ArrowRight size={16} />
           </button>
-          <div className="helper-row recovery-row">
-            <button type="button" className="text-link-button" onClick={handleRecoveryRequest}>Forgot your password?</button>
-            <span>Support: {SUPPORT_PHONE}</span>
-          </div>
-          {recoveryNotice && <p className="auth-success">{recoveryNotice}</p>}
-          {recoveryError && <p className="auth-error">{recoveryError}</p>}
           <div className="helper-row">
             <span>Role: admin</span>
-            <span>Landlords cannot self-register</span>
+            <Link to="/admin/forgot-password" className="text-link">Forgot password?</Link>
           </div>
         </form>
       </div>
@@ -1901,7 +2248,10 @@ function LandlordDashboardPage() {
   const session = getStoredSession();
   const [properties, setProperties] = useState([]);
   const [requests, setRequests] = useState([]);
-  useEffect(() => { getProperties().then(setProperties).catch(() => setProperties([])); getRentalRequests(session?.token).then(setRequests).catch(() => setRequests([])); }, [session?.token]);
+  useEffect(() => {
+    getProperties().then(setProperties).catch(() => setProperties([]));
+    getRentalRequests(session?.token).then(setRequests).catch(() => setRequests([]));
+  }, [session?.token]);
   return (
     <LandlordShell title="Dashboard" subtitle="Track listings, tenant requests, and rental income for your portfolio.">
       <section className="stats-grid">
@@ -1962,15 +2312,9 @@ function LandlordPropertiesPage() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
-  const loadProperties = useCallback(() => {
-    getMyProperties(session?.token)
-      .then(setProperties)
-      .catch((loadError) => setError(loadError.message));
-  }, [session?.token]);
-
-  useEffect(() => {
-    loadProperties();
-  }, [loadProperties]);
+  const loadProperties = () => getMyProperties(session?.token).then(setProperties).catch((loadError) => setError(loadError.message));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { loadProperties(); }, [session?.token]);
 
   const handleDelete = async (id, title) => {
     if (!window.confirm(`Delete "${title}"? This cannot be undone.`)) return;
@@ -2036,18 +2380,7 @@ function LandlordPropertyFormPage() {
   const session = getStoredSession();
   const editing = Boolean(id);
 
-  const defaultForm = {
-    title: '',
-    address: '',
-    city: '',
-    description: '',
-    rent: '',
-    bedrooms: 1,
-    bathrooms: 1,
-    amenities: '',
-    available_from: '',
-    image_url: '',
-  };
+  const defaultForm = { title: '', address: '', city: '', description: '', rent: '', bedrooms: 1, bathrooms: 1, amenities: '', images: '', available_from: '' };
   const [form, setForm] = useState(defaultForm);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -2067,8 +2400,8 @@ function LandlordPropertyFormPage() {
           bedrooms: property.bedrooms || 1,
           bathrooms: property.bathrooms || 1,
           amenities: Array.isArray(property.amenities) ? property.amenities.join(', ') : '',
+          images: Array.isArray(property.images) ? property.images.join(', ') : '',
           available_from: property.available_from ? property.available_from.slice(0, 10) : '',
-          image_url: property.image_url || '',
         });
       })
       .catch((loadError) => setError(loadError.message));
@@ -2076,57 +2409,24 @@ function LandlordPropertyFormPage() {
 
   const setField = (key, value) => setForm((current) => ({ ...current, [key]: value }));
 
-  const normalizePropertyForm = (source) => {
-    const textValue = (value) => (value === undefined || value === null ? '' : String(value).trim());
-    const requiredFields = ['title', 'address', 'city', 'rent'];
-    const missingFields = requiredFields.filter((field) => textValue(source[field]) === '');
-
-    if (missingFields.length > 0) {
-      throw new Error('Missing required property fields.');
-    }
-
-    const rent = validateRentAmount(textValue(source.rent));
-
-    return {
-      title: textValue(source.title),
-      address: textValue(source.address),
-      city: textValue(source.city),
-      description: textValue(source.description),
-      rent,
-      bedrooms: Number(textValue(source.bedrooms || 1)) || 1,
-      bathrooms: Number(textValue(source.bathrooms || 1)) || 1,
-      amenities: textValue(source.amenities)
-        .split(',')
-        .map((item) => item.trim())
-        .filter(Boolean),
-      available_from: textValue(source.available_from) || new Date().toISOString(),
-      image_url: textValue(source.image_url),
-    };
-  };
-
-  const handleImageUpload = (event) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      setError('Please upload a valid image file.');
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = () => {
-      setField('image_url', String(reader.result || ''));
-      setError('');
-    };
-    reader.readAsDataURL(file);
-  };
-
   const handleSubmit = async (event) => {
     event.preventDefault();
     setSubmitting(true);
     setError('');
     setNotice('');
     try {
-      const payload = normalizePropertyForm(form);
+      const payload = {
+        title: form.title.trim(),
+        address: form.address.trim(),
+        city: form.city.trim(),
+        description: form.description.trim(),
+        rent: Number(form.rent),
+        bedrooms: Number(form.bedrooms) || 0,
+        bathrooms: Number(form.bathrooms) || 0,
+        amenities: form.amenities.split(',').map((item) => item.trim()).filter(Boolean),
+        images: form.images.split(',').map((item) => item.trim()).filter(Boolean),
+        available_from: form.available_from || new Date().toISOString(),
+      };
       if (editing) {
         await updateProperty(id, payload, session?.token);
         setNotice('Property updated. Changes are saved.');
@@ -2151,52 +2451,43 @@ function LandlordPropertyFormPage() {
         <div className="form-grid">
           <label>
             Title *
-            <input value={form.title ?? ''} onChange={(event) => setField('title', event.target.value)} required placeholder="Sunflower Suites Apartment" />
+            <input value={form.title} onChange={(event) => setField('title', event.target.value)} required placeholder="Sunflower Suites Apartment" />
           </label>
           <label>
             City *
-            <input value={form.city ?? ''} onChange={(event) => setField('city', event.target.value)} required placeholder="Kilimani" />
+            <input value={form.city} onChange={(event) => setField('city', event.target.value)} required placeholder="Kilimani" />
           </label>
           <label className="form-span-two">
             Address *
-            <input value={form.address ?? ''} onChange={(event) => setField('address', event.target.value)} required placeholder="Ngong Road, Kilimani" />
+            <input value={form.address} onChange={(event) => setField('address', event.target.value)} required placeholder="Ngong Road, Kilimani" />
           </label>
           <label className="form-span-two">
             Description
-            <textarea rows="4" value={form.description ?? ''} onChange={(event) => setField('description', event.target.value)} placeholder="Bright 2-bedroom apartment with a balcony overlooking the city…" />
+            <textarea rows="4" value={form.description} onChange={(event) => setField('description', event.target.value)} placeholder="Bright 2-bedroom apartment with a balcony overlooking the city…" />
           </label>
           <label>
             Monthly rent (KES) *
-            <input type="number" min="1" value={form.rent ?? ''} onChange={(event) => setField('rent', event.target.value)} required placeholder="45000" />
+            <input type="number" min="1" value={form.rent} onChange={(event) => setField('rent', event.target.value)} required placeholder="45000" />
           </label>
           <label>
             Bedrooms
-            <input type="number" min="0" value={form.bedrooms ?? 1} onChange={(event) => setField('bedrooms', event.target.value)} />
+            <input type="number" min="0" value={form.bedrooms} onChange={(event) => setField('bedrooms', event.target.value)} />
           </label>
           <label>
             Bathrooms
-            <input type="number" min="0" value={form.bathrooms ?? 1} onChange={(event) => setField('bathrooms', event.target.value)} />
+            <input type="number" min="0" value={form.bathrooms} onChange={(event) => setField('bathrooms', event.target.value)} />
           </label>
           <label>
             Available from
-            <input type="date" value={form.available_from ?? ''} onChange={(event) => setField('available_from', event.target.value)} />
+            <input type="date" value={form.available_from} onChange={(event) => setField('available_from', event.target.value)} />
           </label>
-          <label className="form-span-two">
-            Upload property image
-            <input type="file" accept="image/*" aria-label="Upload property image" onChange={handleImageUpload} />
-          </label>
-          <label className="form-span-two">
-            Image URL
-            <input value={form.image_url ?? ''} onChange={(event) => setField('image_url', event.target.value)} placeholder="https://example.com/property.jpg" />
-          </label>
-          {form.image_url && (
-            <div className="form-span-two image-preview-box">
-              <img src={form.image_url} alt="Property preview" />
-            </div>
-          )}
           <label className="form-span-two">
             Amenities (comma separated)
-            <input value={form.amenities ?? ''} onChange={(event) => setField('amenities', event.target.value)} placeholder="WiFi, Parking, Water heater, Furnished" />
+            <input value={form.amenities} onChange={(event) => setField('amenities', event.target.value)} placeholder="WiFi, Parking, Water heater, Furnished" />
+          </label>
+          <label className="form-span-two">
+            Image URLs (comma separated)
+            <input value={form.images} onChange={(event) => setField('images', event.target.value)} placeholder="https://example.com/img1.jpg, https://example.com/img2.jpg" />
           </label>
         </div>
         {error && <p className="auth-error">{error}</p>}
@@ -2403,8 +2694,6 @@ function LandlordAuthPage() {
   const navigate = useNavigate();
   const [form, setForm] = useState({ email: '', password: '' });
   const [error, setError] = useState('');
-  const [recoveryNotice, setRecoveryNotice] = useState('');
-  const [recoveryError, setRecoveryError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -2413,26 +2702,6 @@ function LandlordAuthPage() {
       navigate('/landlord', { replace: true });
     }
   }, [navigate]);
-
-  const handleRecoveryRequest = async () => {
-    const emailToUse = form.email.trim();
-    if (!emailToUse) {
-      setRecoveryError('Enter your email to receive recovery instructions.');
-      return;
-    }
-
-    try {
-      setRecoveryError('');
-      setRecoveryNotice('');
-      const payload = await requestPasswordReset(emailToUse);
-      setRecoveryNotice(payload.message || 'Reset instructions were sent.');
-      if (payload.supportPhone) {
-        setRecoveryNotice(`${payload.message} Support: ${payload.supportPhone}`);
-      }
-    } catch (submitError) {
-      setRecoveryError(submitError.message || 'Unable to process the password reset request.');
-    }
-  };
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -2458,7 +2727,7 @@ function LandlordAuthPage() {
     <div className="auth-shell">
       <div className="auth-panel hero-panel">
         <div className="brand-block">
-          <BrandLogo />
+          <img src={LOGO} alt="CasaConnect" className="brand-logo" />
           <div>
             <strong>CasaConnect</strong>
             <small>Landlord access</small>
@@ -2488,15 +2757,9 @@ function LandlordAuthPage() {
             {submitting ? 'Signing in...' : 'Continue to portfolio'}
             <ArrowRight size={16} />
           </button>
-          <div className="helper-row recovery-row">
-            <button type="button" className="text-link-button" onClick={handleRecoveryRequest}>Forgot your password?</button>
-            <span>Support: {SUPPORT_PHONE}</span>
-          </div>
-          {recoveryNotice && <p className="auth-success">{recoveryNotice}</p>}
-          {recoveryError && <p className="auth-error">{recoveryError}</p>}
           <div className="helper-row">
             <span>Role: landlord</span>
-            <span>Admin approval required</span>
+            <Link to="/landlord/forgot-password" className="text-link">Forgot password?</Link>
           </div>
         </form>
       </div>
@@ -2504,207 +2767,33 @@ function LandlordAuthPage() {
   );
 }
 
-function AdminPropertyFormPage() {
-  const navigate = useNavigate();
-  const session = getStoredSession();
-  const [landlords, setLandlords] = useState([]);
-  const [form, setForm] = useState({
-    title: '',
-    address: '',
-    city: '',
-    description: '',
-    rent: '',
-    bedrooms: 1,
-    bathrooms: 1,
-    amenities: '',
-    available_from: '',
-    image_url: '',
-    landlord_id: '',
-  });
-  const [error, setError] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-
-  useEffect(() => {
-    getAdminData('users', session?.token)
-      .then((users) => {
-        const landlordList = Array.isArray(users) ? users.filter((user) => user.role === 'landlord') : [];
-        setLandlords(landlordList);
-        if (landlordList.length && !form.landlord_id) {
-          setForm((current) => ({ ...current, landlord_id: landlordList[0].id }));
-        }
-      })
-      .catch(() => setLandlords([]));
-  }, [session?.token, form.landlord_id]);
-
-  const setField = (key, value) => setForm((current) => ({ ...current, [key]: value }));
-
-  const normalizePropertyForm = (source) => {
-    const textValue = (value) => (value === undefined || value === null ? '' : String(value).trim());
-    const requiredFields = ['title', 'address', 'city', 'rent'];
-    const missingFields = requiredFields.filter((field) => textValue(source[field]) === '');
-
-    if (missingFields.length > 0) {
-      throw new Error('Missing required property fields.');
-    }
-
-    const rent = validateRentAmount(textValue(source.rent));
-
-    return {
-      title: textValue(source.title),
-      address: textValue(source.address),
-      city: textValue(source.city),
-      description: textValue(source.description),
-      rent,
-      bedrooms: Number(textValue(source.bedrooms || 1)) || 1,
-      bathrooms: Number(textValue(source.bathrooms || 1)) || 1,
-      amenities: textValue(source.amenities)
-        .split(',')
-        .map((item) => item.trim())
-        .filter(Boolean),
-      available_from: textValue(source.available_from) || new Date().toISOString(),
-      image_url: textValue(source.image_url),
-    };
-  };
-
-  const handleImageUpload = (event) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      setError('Please upload a valid image file.');
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = () => {
-      setField('image_url', String(reader.result || ''));
-      setError('');
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const handleSubmit = async (event) => {
-    event.preventDefault();
-    setSubmitting(true);
-    setError('');
-
-    try {
-      const payload = normalizePropertyForm(form);
-
-      if (!form.landlord_id) {
-        throw new Error('Please select a landlord before creating the property.');
-      }
-
-      const submitPayload = { ...payload, landlord_id: form.landlord_id };
-
-      await createPropertyAsAdmin(submitPayload, session?.token);
-      navigate('/admin/properties', { replace: true });
-    } catch (submitError) {
-      setError(submitError.message || 'Unable to create the property.');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <AdminShell title="New property" subtitle="Create a listing for the marketplace from the admin panel.">
-      <form className="panel form-panel create-property-form" onSubmit={handleSubmit}>
-        <div className="form-grid">
-          <label>
-            Title *
-            <input value={form.title ?? ''} onChange={(event) => setField('title', event.target.value)} required placeholder="Sunflower Suites Apartment" />
-          </label>
-          <label>
-            City *
-            <input value={form.city ?? ''} onChange={(event) => setField('city', event.target.value)} required placeholder="Kilimani" />
-          </label>
-          <label className="form-span-two">
-            Address *
-            <input value={form.address ?? ''} onChange={(event) => setField('address', event.target.value)} required placeholder="Ngong Road, Kilimani" />
-          </label>
-          <label className="form-span-two">
-            Description
-            <textarea rows="4" value={form.description ?? ''} onChange={(event) => setField('description', event.target.value)} placeholder="Bright 2-bedroom apartment with a balcony overlooking the city…" />
-          </label>
-          <label>
-            Monthly rent (KES) *
-            <input type="number" min="1" value={form.rent ?? ''} onChange={(event) => setField('rent', event.target.value)} required placeholder="45000" />
-          </label>
-          <label>
-            Assigned landlord *
-            <select value={form.landlord_id ?? ''} onChange={(event) => setField('landlord_id', event.target.value)} required>
-              <option value="">Select landlord</option>
-              {landlords.map((landlord) => (
-                <option key={landlord.id} value={landlord.id}>
-                  {landlord.full_name || landlord.name || landlord.email}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Bedrooms
-            <input type="number" min="0" value={form.bedrooms ?? 1} onChange={(event) => setField('bedrooms', event.target.value)} />
-          </label>
-          <label>
-            Bathrooms
-            <input type="number" min="0" value={form.bathrooms ?? 1} onChange={(event) => setField('bathrooms', event.target.value)} />
-          </label>
-          <label>
-            Available from
-            <input type="date" value={form.available_from ?? ''} onChange={(event) => setField('available_from', event.target.value)} />
-          </label>
-          <label className="form-span-two">
-            Upload property image
-            <input type="file" accept="image/*" aria-label="Upload property image" onChange={handleImageUpload} />
-          </label>
-          <label className="form-span-two">
-            Image URL
-            <input value={form.image_url ?? ''} onChange={(event) => setField('image_url', event.target.value)} placeholder="https://example.com/property.jpg" />
-          </label>
-          {form.image_url && (
-            <div className="form-span-two image-preview-box">
-              <img src={form.image_url} alt="Property preview" />
-            </div>
-          )}
-          <label className="form-span-two">
-            Amenities (comma separated)
-            <input value={form.amenities ?? ''} onChange={(event) => setField('amenities', event.target.value)} placeholder="WiFi, Parking, Water heater, Furnished" />
-          </label>
-        </div>
-        {error && <p className="auth-error">{error}</p>}
-        <div className="form-actions">
-          <Link className="ghost-button" to="/admin/properties">
-            <ArrowLeft size={15} /> Back
-          </Link>
-          <button type="submit" className="primary-button" disabled={submitting}>
-            {submitting ? 'Saving…' : 'Create property'}
-          </button>
-        </div>
-      </form>
-    </AdminShell>
-  );
-}
-
 function App() {
-  useEffect(() => {
-    document.title = 'casaconnect';
-  }, []);
+  const [splash, setSplash] = useState(!sessionStorage.getItem('cc_splash'));
+  const hideSplash = () => { sessionStorage.setItem('cc_splash', '1'); setSplash(false); };
+  const session = getStoredSession();
+  const showWidget = session?.user?.role === 'tenant' || session?.user?.role === 'landlord';
+
+  if (splash) return <SplashScreen onDone={hideSplash} />;
 
   return (
     <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      {showWidget && <SupportWidget />}
       <Routes>
         <Route path="/" element={<RootRedirect />} />
         <Route path="/properties/:id" element={<UserPropertyDetailsPage />} />
 
-        <Route path="/user" element={<ProtectedRoute allowedRoles={['tenant']} fallbackPath="/user/login"><UserDashboardPage /></ProtectedRoute>} />
-        <Route path="/user/login" element={<UserAuthPage />} />
-        <Route path="/user/register" element={<UserAuthPage />} />
-        <Route path="/user/properties" element={<ProtectedRoute allowedRoles={['tenant']} fallbackPath="/user/login"><UserPropertiesPage /></ProtectedRoute>} />
-        <Route path="/user/properties/:id" element={<ProtectedRoute allowedRoles={['tenant', 'admin']} fallbackPath="/user/login"><UserPropertyDetailsPage /></ProtectedRoute>} />
-        <Route path="/user/requests" element={<ProtectedRoute allowedRoles={['tenant']} fallbackPath="/user/login"><UserRequestsPage /></ProtectedRoute>} />
-        <Route path="/user/payments" element={<ProtectedRoute allowedRoles={['tenant']} fallbackPath="/user/login"><UserPaymentsPage /></ProtectedRoute>} />
-        <Route path="/user/messages" element={<ProtectedRoute allowedRoles={['tenant']} fallbackPath="/user/login"><UserMessagesPage /></ProtectedRoute>} />
-        <Route path="/user/profile" element={<ProtectedRoute allowedRoles={['tenant']} fallbackPath="/user/login"><UserProfilePage /></ProtectedRoute>} />
-        <Route path="/user/settings" element={<ProtectedRoute allowedRoles={['tenant']} fallbackPath="/user/login"><UserSettingsPage /></ProtectedRoute>} />
+        <Route path="/tenant" element={<ProtectedRoute allowedRoles={['tenant']} fallbackPath="/tenant/login"><UserDashboardPage /></ProtectedRoute>} />
+        <Route path="/tenant/login" element={<UserAuthPage />} />
+        <Route path="/tenant/register" element={<UserAuthPage />} />
+        <Route path="/tenant/properties" element={<ProtectedRoute allowedRoles={['tenant']} fallbackPath="/tenant/login"><UserPropertiesPage /></ProtectedRoute>} />
+        <Route path="/tenant/properties/:id" element={<ProtectedRoute allowedRoles={['tenant', 'admin']} fallbackPath="/tenant/login"><UserPropertyDetailsPage /></ProtectedRoute>} />
+        <Route path="/tenant/requests" element={<ProtectedRoute allowedRoles={['tenant']} fallbackPath="/tenant/login"><UserRequestsPage /></ProtectedRoute>} />
+        <Route path="/tenant/payments" element={<ProtectedRoute allowedRoles={['tenant']} fallbackPath="/tenant/login"><UserPaymentsPage /></ProtectedRoute>} />
+        <Route path="/tenant/messages" element={<ProtectedRoute allowedRoles={['tenant']} fallbackPath="/tenant/login"><UserMessagesPage /></ProtectedRoute>} />
+        <Route path="/tenant/profile" element={<ProtectedRoute allowedRoles={['tenant']} fallbackPath="/tenant/login"><UserProfilePage /></ProtectedRoute>} />
+
+        <Route path="/tenant/forgot-password" element={<ForgotPasswordPage portal="tenant" />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
 
         <Route path="/admin" element={<ProtectedRoute allowedRoles={['admin']} fallbackPath="/admin/login"><AdminDashboardPage /></ProtectedRoute>} />
         <Route path="/admin/login" element={<AdminAuthPage />} />
@@ -2712,9 +2801,12 @@ function App() {
         <Route path="/admin/users" element={<ProtectedRoute allowedRoles={['admin']} fallbackPath="/admin/login"><AdminUsersPage /></ProtectedRoute>} />
         <Route path="/admin/landlords" element={<ProtectedRoute allowedRoles={['admin']} fallbackPath="/admin/login"><AdminLandlordsPage /></ProtectedRoute>} />
         <Route path="/admin/properties" element={<ProtectedRoute allowedRoles={['admin']} fallbackPath="/admin/login"><AdminPropertiesPage /></ProtectedRoute>} />
-        <Route path="/admin/properties/new" element={<ProtectedRoute allowedRoles={['admin']} fallbackPath="/admin/login"><AdminPropertyFormPage /></ProtectedRoute>} />
+        <Route path="/admin/requests" element={<ProtectedRoute allowedRoles={['admin']} fallbackPath="/admin/login"><AdminRequestsPage /></ProtectedRoute>} />
+        <Route path="/admin/messages" element={<ProtectedRoute allowedRoles={['admin']} fallbackPath="/admin/login"><AdminMessagesPage /></ProtectedRoute>} />
         <Route path="/admin/reviews" element={<ProtectedRoute allowedRoles={['admin']} fallbackPath="/admin/login"><AdminReviewsPage /></ProtectedRoute>} />
         <Route path="/admin/settings" element={<ProtectedRoute allowedRoles={['admin']} fallbackPath="/admin/login"><AdminSettingsPage /></ProtectedRoute>} />
+
+        <Route path="/admin/forgot-password" element={<ForgotPasswordPage portal="admin" />} />
 
         <Route path="/landlord" element={<ProtectedRoute allowedRoles={['landlord']} fallbackPath="/landlord/login"><LandlordDashboardPage /></ProtectedRoute>} />
         <Route path="/landlord/login" element={<LandlordAuthPage />} />
@@ -2723,6 +2815,7 @@ function App() {
         <Route path="/landlord/properties/:id/edit" element={<ProtectedRoute allowedRoles={['landlord']} fallbackPath="/landlord/login"><LandlordPropertyFormPage /></ProtectedRoute>} />
         <Route path="/landlord/requests" element={<ProtectedRoute allowedRoles={['landlord']} fallbackPath="/landlord/login"><LandlordRequestsPage /></ProtectedRoute>} />
         <Route path="/landlord/messages" element={<ProtectedRoute allowedRoles={['landlord']} fallbackPath="/landlord/login"><LandlordMessagesPage /></ProtectedRoute>} />
+        <Route path="/landlord/forgot-password" element={<ForgotPasswordPage portal="landlord" />} />
         <Route path="/landlord/payments" element={<ProtectedRoute allowedRoles={['landlord']} fallbackPath="/landlord/login"><LandlordPaymentsPage /></ProtectedRoute>} />
       </Routes>
     </BrowserRouter>

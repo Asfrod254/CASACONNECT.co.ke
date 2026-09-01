@@ -110,9 +110,39 @@ router.post("/properties", async (req, res, next) => {
     return next(error);
   }
 });
-router.get("/reviews", list("reviews"));
-router.get("/messages", list("messages"));
+router.get("/reviews", list("reviews", "*, properties(title)"));
+router.get("/messages", async (req, res, next) => {
+  try {
+    const { data, error } = await ensureSupabaseAdmin()
+      .from("messages")
+      .select("*, properties(title), sender:users!sender_id(full_name, email, role)")
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+    return res.json({ success: true, messages: data || [] });
+  } catch (e) { return next(e); }
+});
 router.get("/payments", list("payments"));
+router.get("/requests", async (req, res, next) => {
+  try {
+    const { data, error } = await ensureSupabaseAdmin()
+      .from("rental_requests")
+      .select("*, properties(title, city, rent), tenant:users!tenant_id(full_name, email)")
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+    return res.json({ success: true, requests: data || [] });
+  } catch (e) { return next(e); }
+});
+router.get("/landlords", async (req, res, next) => {
+  try {
+    const { data, error } = await ensureSupabaseAdmin()
+      .from("users")
+      .select("id, full_name, email, phone, company, account_status, created_at")
+      .eq("role", "landlord")
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+    return res.json({ success: true, landlords: data || [] });
+  } catch (e) { return next(e); }
+});
 router.get("/stats", async (req, res, next) => {
   try {
     const client = ensureSupabaseAdmin();
@@ -194,6 +224,32 @@ router.get("/analytics", async (req, res, next) => {
       },
     });
   } catch (error) { return next(error); }
+});
+
+router.patch("/requests/:id", async (req, res, next) => {
+  try {
+    const status = String(req.body?.status || "").toLowerCase();
+    if (!["pending","approved","rejected","withdrawn"].includes(status)) return res.status(400).json({ success: false, message: "Invalid status." });
+    const { data, error } = await ensureSupabaseAdmin().from("rental_requests").update({ status }).eq("id", req.params.id).select("*").single();
+    if (error) throw error;
+    return res.json({ success: true, request: data });
+  } catch (e) { return next(e); }
+});
+
+router.delete("/properties/:id", async (req, res, next) => {
+  try {
+    const { error } = await ensureSupabaseAdmin().from("properties").delete().eq("id", req.params.id);
+    if (error) throw error;
+    return res.json({ success: true });
+  } catch (e) { return next(e); }
+});
+
+router.delete("/users/:id", async (req, res, next) => {
+  try {
+    const { error } = await ensureSupabaseAdmin().from("users").delete().eq("id", req.params.id);
+    if (error) throw error;
+    return res.json({ success: true });
+  } catch (e) { return next(e); }
 });
 
 router.patch("/users/:id", async (req, res, next) => {
